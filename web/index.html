@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <title>煤矿数字孪生系统</title>
+
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: Arial;
+        }
+
+        #panel {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: white;
+            padding: 10px;
+            border-radius: 5px;
+        }
+    </style>
+
+</head>
+
+<body>
+
+    <div id="panel">
+        <button onclick="start()">启动设备</button>
+        <button onclick="stop()">停止设备</button>
+        <br><br>
+        设备转速: <span id="rpm">1000</span> RPM
+
+        <br><br>
+
+        <b>设备信息</b>
+        <br>
+        名称: <span id="deviceName">风机</span>
+        <br>
+        转速: <span id="deviceRPM">0</span>
+        <br>
+        状态: <span id="deviceStatus">停止</span>
+    </div>
+
+    <script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.158/build/three.module.js"
+  }
+}
+</script>
+    <script type="module">
+        import * as THREE from "three";
+        import { GLTFLoader } from "https://cdn.jsdelivr.net/npm/three@0.158/examples/jsm/loaders/GLTFLoader.js";
+        import { OrbitControls } from "https://cdn.jsdelivr.net/npm/three@0.158/examples/jsm/controls/OrbitControls.js";
+
+        // 创建场景
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xdddddd);
+
+        // 创建相机
+        const camera = new THREE.PerspectiveCamera(
+            75,
+            window.innerWidth / window.innerHeight,
+            0.1,
+            1000
+        );
+
+        // 创建渲染器
+        const renderer = new THREE.WebGLRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // 鼠标点击检测（Raycaster）
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        // 当前选中的对象
+        let selectedObject = null;
+
+        // 添加轨道控制器
+        const controls = new OrbitControls(camera, renderer.domElement);
+
+        // 启用阻尼效果
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+
+        // 创建地面
+        const floorGeometry = new THREE.PlaneGeometry(20, 20);
+        const floorMaterial = new THREE.MeshBasicMaterial({
+            color: 0x999999,
+            side: THREE.DoubleSide
+        });
+
+        const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+        floor.rotation.x = Math.PI / 2;
+        scene.add(floor);
+
+        // 添加光源
+        const light = new THREE.DirectionalLight(0xffffff, 1);
+        light.position.set(5, 10, 5);
+        scene.add(light);
+
+        // 环境光
+        const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambient);
+
+        // 加载3D模型
+        let machine;
+
+        const loader = new GLTFLoader();
+
+        loader.load('../models/fan.glb', function (gltf) {
+
+            machine = gltf.scene;
+
+            // 计算包围盒
+            const box = new THREE.Box3().setFromObject(machine);
+            const size = box.getSize(new THREE.Vector3());
+
+            // 获取最大尺寸
+            const maxDim = Math.max(size.x, size.y, size.z);
+
+            // 计算缩放比例
+            const scale = 2 / maxDim;
+
+            machine.scale.set(scale, scale, scale);
+
+            // 放在地面上
+            machine.position.set(0, 0, 0);
+
+            scene.add(machine);
+
+        });
+
+        // 相机位置
+        camera.position.set(6, 5, 8);
+        camera.lookAt(0, 0, 0);
+
+        // 设备转速
+        let rpm = 1000;
+        let status = "alarm";
+        let alarmBlink = false;
+        const socket = new WebSocket("ws://localhost:3000");
+
+        socket.onopen = function () {
+            console.log("网页已连接服务器");
+        };
+
+        socket.onmessage = function (event) {
+
+            const data = JSON.parse(event.data);
+
+            if (data.type === "status") {
+
+                rpm = data.rpm;
+
+                if (rpm > 0) {
+                    status = "run";
+                } else {
+                    status = "stop";
+                }
+
+                document.getElementById("rpm").innerText = rpm;
+
+            }
+
+        };
+        window.start = function () {
+
+            socket.send(JSON.stringify({
+                type: "control",
+                command: "start"
+            }));
+
+        }
+
+        window.stop = function () {
+
+            socket.send(JSON.stringify({
+                type: "control",
+                command: "stop"
+            }));
+
+        }
+
+        // 更新设备颜色
+        function updateMachineColor() {
+
+            if (!machine) return;
+
+            machine.traverse(function (child) {
+
+                if (child.isMesh) {
+
+                    if (status === "run") {
+                        child.material.color.set(0x00ff00);
+                    }
+
+                    if (status === "stop") {
+                        child.material.color.set(0x888888);
+                    }
+
+                    if (status === "alarm") {
+
+                        if (alarmBlink) {
+                            child.material.color.set(0xff0000); // 红色
+                        } else {
+                            child.material.color.set(0x000000); // 黑色
+                        }
+
+                    }
+
+                }
+
+            });
+
+        }
+
+        // 闪烁定时器
+        setInterval(function () {
+
+            if (status === "alarm") {
+                alarmBlink = !alarmBlink;
+            }
+
+        }, 500);
+
+        // 动画循环函数
+        function animate() {
+
+            requestAnimationFrame(animate);
+
+            controls.update();
+
+            if (machine) {
+                machine.rotation.y += rpm * 0.0001;
+            }
+
+            // 更新设备颜色
+            updateMachineColor();
+
+            renderer.render(scene, camera);
+
+        }
+
+        animate();
+
+        // 鼠标点击事件处理
+        window.addEventListener("click", onMouseClick);
+
+        // 点击检测函数
+        function onMouseClick(event) {
+
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+
+            const intersects = raycaster.intersectObject(machine, true);
+
+            if (intersects.length > 0) {
+
+                const clicked = intersects[0].object;
+
+                // 恢复之前高亮
+                if (selectedObject) {
+                    selectedObject.material.color.set(0xffffff);
+                }
+
+                // 设置新的高亮
+                selectedObject = clicked;
+                selectedObject.material.color.set(0xff0000);
+
+                // 更新设备信息
+                document.getElementById("deviceName").innerText = "矿井风机";
+                document.getElementById("deviceRPM").innerText = rpm;
+
+                if (rpm > 0) {
+                    document.getElementById("deviceStatus").innerText = "运行";
+                } else {
+                    document.getElementById("deviceStatus").innerText = "停止";
+                }
+
+            }
+
+        }
+    </script>
+
+</body>
+
+</html>

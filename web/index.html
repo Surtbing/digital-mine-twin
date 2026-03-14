@@ -57,7 +57,8 @@
 
         // 创建场景
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0xdddddd);
+        scene.background = new THREE.Color(0x444444);
+        scene.fog = new THREE.Fog(0x999999, 5, 80);
 
         // 创建相机
         const camera = new THREE.PerspectiveCamera(
@@ -86,16 +87,79 @@
         controls.enableDamping = true;
         controls.dampingFactor = 0.05;
 
-        // 创建地面
-        const floorGeometry = new THREE.PlaneGeometry(20, 20);
-        const floorMaterial = new THREE.MeshBasicMaterial({
-            color: 0x999999,
+        // 加载纹理
+        const textureLoader = new THREE.TextureLoader();
+
+        const rockTexture = textureLoader.load('../textures/rock1.jpg');
+
+        rockTexture.wrapS = THREE.RepeatWrapping;
+        rockTexture.wrapT = THREE.RepeatWrapping;
+        rockTexture.repeat.set(4, 2);
+
+        const wallMaterial = new THREE.MeshStandardMaterial({
+            map: rockTexture,
             side: THREE.DoubleSide
         });
 
-        const floor = new THREE.Mesh(floorGeometry, floorMaterial);
-        floor.rotation.x = Math.PI / 2;
-        scene.add(floor);
+        // 创建矿井巷道
+        for (let i = -50; i <= 50; i += 20) {
+
+            // 左墙
+            const leftWall = new THREE.Mesh(
+                new THREE.BoxGeometry(20, 4, 0.5),
+                wallMaterial
+            );
+            leftWall.position.set(i, 2, -10);
+            scene.add(leftWall);
+
+            // 右墙
+            const rightWall = new THREE.Mesh(
+                new THREE.BoxGeometry(20, 4, 0.5),
+                wallMaterial
+            );
+            rightWall.position.set(i, 2, 10);
+            scene.add(rightWall);
+
+            // 拱形顶部
+            const arch = new THREE.Mesh(
+                new THREE.CylinderGeometry(
+                    10.5,  // 半径顶部
+                    10.5,
+                    22, // 巷道左右宽度
+                    32, // 圆周分段数
+                    1,
+                    true,
+                    0,
+                    Math.PI
+                ),
+                wallMaterial
+            );
+
+            arch.rotation.z = Math.PI / 2;
+            arch.position.set(i, 1, 0);
+
+            scene.add(arch);
+
+
+        }
+
+        // 创建矿井地面
+        for (let i = -50; i <= 50; i += 20) {
+
+            const floor = new THREE.Mesh(
+                new THREE.PlaneGeometry(20, 20),
+                new THREE.MeshStandardMaterial({
+                    map: rockTexture,
+                    side: THREE.DoubleSide
+                })
+            );
+
+            floor.rotation.x = Math.PI / 2;
+
+            floor.position.set(i, 0, 0);
+
+            scene.add(floor);
+        }
 
         // 添加光源
         const light = new THREE.DirectionalLight(0xffffff, 1);
@@ -103,8 +167,23 @@
         scene.add(light);
 
         // 环境光
-        const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+        const ambient = new THREE.AmbientLight(0xffffff, 0.3);
         scene.add(ambient);
+
+        // 矿井灯光
+        for (let i = -40; i <= 40; i += 8) {
+            const lamp = new THREE.PointLight(0xffeeaa, 5, 60);
+            lamp.position.set(i, 10.5, 0);
+            scene.add(lamp);
+
+            const bulb = new THREE.Mesh(
+                new THREE.SphereGeometry(0.25, 16, 16),
+                new THREE.MeshBasicMaterial({ color: 0xffee88 })
+            );
+            bulb.position.copy(lamp.position);
+            scene.add(bulb);
+
+        }
 
         // 加载3D模型
         let machine;
@@ -135,8 +214,8 @@
         });
 
         // 相机位置
-        camera.position.set(6, 5, 8);
-        camera.lookAt(0, 0, 0);
+        camera.position.set(0, 3, 12);
+        camera.lookAt(0, 2, 0);
 
         // 设备转速
         let rpm = 1000;

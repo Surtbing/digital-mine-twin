@@ -187,12 +187,34 @@
 
         // 加载3D模型
         let machine;
+        //let fanPart = null;
+        let fanParts = [];
 
         const loader = new GLTFLoader();
 
         loader.load('../models/fan.glb', function (gltf) {
 
             machine = gltf.scene;
+
+            // 输出所有 Mesh 名称，方便确认叶片
+            machine.traverse(child => {
+                if (child.isMesh) console.log("Mesh:", child.name);
+            });
+
+            // 根据名称选中叶片
+            machine.traverse(child => {
+                if (child.isMesh && ["Object_40"].includes(child.name)) {
+                    fanParts.push(child);
+                    console.log("选中叶片:", child.name);
+                }
+            });
+
+            machine.traverse(child => {
+                if (child.isMesh) {
+                    console.log(child.name, child.geometry.attributes.position.count);
+                }
+            });
+
 
             // 计算包围盒
             const box = new THREE.Box3().setFromObject(machine);
@@ -219,19 +241,24 @@
 
         // 设备转速
         let rpm = 1000;
-        let status = "alarm";
+        let status = "stop";
         let alarmBlink = false;
         const socket = new WebSocket("ws://localhost:3000");
 
         socket.onopen = function () {
             console.log("网页已连接服务器");
+
+            //关键：注册为网页客户端
+            socket.send(JSON.stringify({
+                type: "web"
+            }));
         };
 
         socket.onmessage = function (event) {
 
             const data = JSON.parse(event.data);
 
-            if (data.type === "status") {
+            if (data.type === "status" && data.deviceId === "fan1") {
 
                 rpm = data.rpm;
 
@@ -246,12 +273,19 @@
             }
 
         };
+
         window.start = function () {
 
-            socket.send(JSON.stringify({
+            console.log("点击了启动按钮");
+            const msg = {
                 type: "control",
+                deviceId: "fan1",
                 command: "start"
-            }));
+            };
+
+            console.log("准备发送:", msg);
+
+            socket.send(JSON.stringify(msg));
 
         }
 
@@ -259,6 +293,7 @@
 
             socket.send(JSON.stringify({
                 type: "control",
+                deviceId: "fan1",
                 command: "stop"
             }));
 
@@ -313,9 +348,13 @@
 
             controls.update();
 
-            if (machine) {
-                machine.rotation.y += rpm * 0.0001;
+            // 只旋转叶片
+            if (fanParts.length > 0) {
+                fanParts.forEach(part => {
+                    part.rotation.y += rpm * 0.0001;
+                });
             }
+
 
             // 更新设备颜色
             updateMachineColor();

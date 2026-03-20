@@ -16,31 +16,183 @@
             position: absolute;
             top: 20px;
             left: 20px;
-            background: white;
+            width: 280px;
+            background: #151a22;
+            color: #d7dde6;
+            padding: 14px;
+            border-radius: 8px;
+            font-family: Arial;
+            font-size: 13px;
+        }
+
+        .title {
+            font-weight: bold;
+            margin-bottom: 12px;
+            color: #00d4ff;
+        }
+
+        .row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 0;
+            border-bottom: 1px solid #2a3442;
+        }
+
+        .label {
+            color: #8a94a6;
+        }
+
+        .value {
+            color: #ffffff;
+        }
+
+        .btns {
+            margin-top: 10px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .btns button {
+            width: 48%;
+            padding: 6px;
+            background: #2a3442;
+            color: white;
+            border: none;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+
+        .btns button:hover {
+            background: #3a475a;
+        }
+
+        .dashboard {
+            margin-top: 12px;
+        }
+
+        .card {
+            background: #1c2430;
             padding: 10px;
-            border-radius: 5px;
+            margin-top: 10px;
+            border-radius: 6px;
+        }
+
+        /* 状态灯 */
+        .lamp {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .online {
+            background: #00ff88;
+        }
+
+        .offline {
+            background: gray;
+        }
+
+        .run {
+            background: #00ff88;
+        }
+
+        .stop {
+            background: #888;
+        }
+
+        .alarm {
+            background: red;
+        }
+
+        /* 温度条 */
+        .gauge {
+            position: relative;
+            height: 12px;
+            background: #2a3442;
+            border-radius: 6px;
+            margin-top: 6px;
+        }
+
+        #gaugeFill {
+            height: 12px;
+            width: 0%;
+            background: linear-gradient(90deg, #00d4ff, #00ff88);
+            border-radius: 6px;
+        }
+
+        #tempText {
+            font-size: 12px;
+            margin-top: 6px;
+            display: block;
         }
     </style>
+
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+
 
 </head>
 
 <body>
 
     <div id="panel">
-        <button onclick="start()">启动设备</button>
-        <button onclick="stop()">停止设备</button>
-        <br><br>
-        设备转速: <span id="rpm">1000</span> RPM
 
-        <br><br>
+        <div class="title">🏭 设备监控中心</div>
 
-        <b>设备信息</b>
-        <br>
-        名称: <span id="deviceName">风机</span>
-        <br>
-        转速: <span id="deviceRPM">0</span>
-        <br>
-        状态: <span id="deviceStatus">停止</span>
+        <div class="row">
+            <div class="label">网络状态</div>
+            <div class="value"><span id="online">离线</span></div>
+        </div>
+
+        <div class="row">
+            <div class="label">设备</div>
+            <div class="value" id="deviceName">风机</div>
+        </div>
+
+        <div class="row">
+            <div class="label">RPM</div>
+            <div class="value"><span id="rpm">0</span></div>
+        </div>
+
+        <div class="row">
+            <div class="label">温度</div>
+            <div class="value"><span id="temp">0</span> ℃</div>
+        </div>
+
+        <div class="row">
+            <div class="label">状态</div>
+            <div class="value" id="deviceStatus">停止</div>
+        </div>
+
+        <div class="btns">
+            <button onclick="start()">启动</button>
+            <button onclick="stop()">停止</button>
+        </div>
+
+        <div class="dashboard">
+
+            <div class="card">
+                <div class="label">状态灯</div>
+                <div id="lamp" class="lamp offline"></div>
+            </div>
+
+            <div class="card">
+                <div class="label">温度仪表</div>
+                <div class="gauge">
+                    <div id="tempBar"></div>
+                    <span id="tempText">0℃</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="label">温度趋势</div>
+                <canvas id="trendChart"></canvas>
+            </div>
+
+        </div>
+
+
     </div>
 
     <script type="importmap">
@@ -243,10 +395,15 @@
         let rpm = 1000;
         let status = "stop";
         let alarmBlink = false;
+        let temperature = 0;
         const socket = new WebSocket("ws://localhost:3000");
 
         socket.onopen = function () {
             console.log("网页已连接服务器");
+
+            // 更新在线状态
+            document.getElementById("online").innerText = "在线";
+            document.getElementById("online").style.color = "green";
 
             //关键：注册为网页客户端
             socket.send(JSON.stringify({
@@ -254,21 +411,77 @@
             }));
         };
 
+        // 连接断开处理
+        socket.onclose = function () {
+            console.log("连接断开");
+
+            document.getElementById("online").innerText = "离线";
+            document.getElementById("online").style.color = "red";
+        };
+
         socket.onmessage = function (event) {
 
             const data = JSON.parse(event.data);
+            console.log("收到数据:", data); // 调试输出
 
             if (data.type === "status" && data.deviceId === "fan1") {
 
-                rpm = data.rpm;
+                rpm = data.data.rpm;
+                temperature = data.data.temperature;
 
+                const temp = temperature;
+
+                // ===== 状态灯 =====
+                const lamp = document.getElementById("lamp");
+
+                lamp.className = "lamp";
+
+                if (data.deviceId !== "fan1") return;
+
+                if (data.data.rpm > 0) {
+                    lamp.classList.add("run");
+                } else {
+                    lamp.classList.add("stop");
+                }
+
+                if (temp > 70) {
+                    lamp.classList.add("alarm");
+                }
+
+                // ===== 温度条 =====
+                document.getElementById("tempText").innerText = temp + "℃";
+
+                const percent = Math.min(temp, 100);
+                document.getElementById("tempBar").style.width = percent + "%";
+
+                // ===== 趋势图 =====
+                updateChart(temp);
+
+                // 根据转速更新状态
                 if (rpm > 0) {
                     status = "run";
                 } else {
                     status = "stop";
                 }
 
+                // 报警逻辑
+                if (temperature > 70) {
+                    status = "alarm";
+                }
+
+                // UI状态同步（新增）
+                if (status === "run") {
+                    document.getElementById("deviceStatus").innerText = "运行";
+                } else if (status === "stop") {
+                    document.getElementById("deviceStatus").innerText = "停止";
+                } else if (status === "alarm") {
+                    document.getElementById("deviceStatus").innerText = "报警";
+                }
+
+                // 更新设备信息显示
                 document.getElementById("rpm").innerText = rpm;
+                // 新增：温度显示
+                document.getElementById("temp").innerText = temperature;
 
             }
 
@@ -397,11 +610,66 @@
 
                 if (rpm > 0) {
                     document.getElementById("deviceStatus").innerText = "运行";
+                    document.getElementById("temp").innerText = temperature;
                 } else {
                     document.getElementById("deviceStatus").innerText = "停止";
                 }
 
             }
+
+        }
+
+        const chart = echarts.init(document.getElementById("trendChart"));
+
+        let chartData = [];
+
+        function updateChart(value) {
+
+            const now = Date.now();
+
+            chartData.push([now, value]);
+
+            if (chartData.length > 20) {
+                chartData.shift();
+            }
+
+            chart.setOption({
+                grid: {
+                    left: "1%",
+                    right: "10%",
+                    top: 20,
+                    bottom: 40,
+                    containLabel: true
+                },
+
+                xAxis: {
+                    type: "time",
+                    boundaryGap: false,
+                    axisLabel: {
+                        hideOverlap: true
+                    }
+                },
+
+                yAxis: {
+                    type: "value",
+                    min: 0,
+                    max: 100
+                },
+
+                series: [{
+                    type: "line",
+                    data: chartData,
+                    smooth: true,
+                    showSymbol: false,
+                    clip: true,
+                    lineStyle: {
+                        width: 2
+                    },
+                    areaStyle: {
+                        opacity: 0.1
+                    }
+                }]
+            });
 
         }
     </script>

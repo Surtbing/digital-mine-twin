@@ -61,12 +61,17 @@ setInterval(() => {
         rpm -= 20;
     }
 
-    // 模拟温度变化
-    if (rpm > 0) {
-        temperature += 0.1;
-    } else {
-        temperature -= 0.1;
-    }
+    // 环境温度
+    const ambientTemp = 25;
+
+    // 发热（转速越高，发热越大）
+    let heat = rpm * 0.002;
+
+    // 散热（温差越大，降温越快）
+    let cooling = (temperature - ambientTemp) * 0.05;
+
+    // 温度变化
+    temperature += heat - cooling;
 
     // 限制温度范围
     temperature = Math.max(20, Math.min(90, temperature));
@@ -75,8 +80,11 @@ setInterval(() => {
     ws.send(JSON.stringify({
         type: "status",
         deviceId: deviceId,
-        rpm: Math.round(rpm),
-        temperature: Math.round(temperature)
+        timestamp: Date.now(),
+        data: {
+            rpm: Math.round(rpm),
+            temperature: Math.round(temperature)
+        }
     }));
 
 }, 1000);

@@ -3,12 +3,12 @@
 
 <head>
     <meta charset="utf-8">
-    <title>煤矿数字孪生系统</title>
+    <title>煤矿井下数字孪生系统</title>
 
     <style>
         body {
             margin: 0;
-            overflow: hidden;
+            overflow-y: auto;
             font-family: Arial;
         }
 
@@ -23,6 +23,9 @@
             border-radius: 8px;
             font-family: Arial;
             font-size: 13px;
+
+            max-height: 90vh;   /* 限制最大高度 */
+            overflow-y: auto;   /* 面板内部滚动 */
         }
 
         .title {
@@ -115,7 +118,7 @@
             margin-top: 6px;
         }
 
-        #gaugeFill {
+        #tempBar {
             height: 12px;
             width: 0%;
             background: linear-gradient(90deg, #00d4ff, #00ff88);
@@ -138,7 +141,14 @@
 
     <div id="panel">
 
-        <div class="title">🏭 设备监控中心</div>
+        <div class="title">设备监控中心</div>
+
+
+        <!-- 设备列表 -->
+        <div class="card">
+            <div class="label">设备列表</div>
+            <div id="deviceList"></div>
+        </div>
 
         <div class="row">
             <div class="label">网络状态</div>
@@ -156,8 +166,13 @@
         </div>
 
         <div class="row">
-            <div class="label">温度</div>
-            <div class="value"><span id="temp">0</span> ℃</div>
+            <div class="label">环境温度</div>
+            <div class="value"><span id="envTemp">0</span> ℃</div>
+        </div>
+
+        <div class="row">
+            <div class="label">设备温度</div>
+            <div class="value"><span id="fanTemp">0</span> ℃</div>
         </div>
 
         <div class="row">
@@ -165,9 +180,19 @@
             <div class="value" id="deviceStatus">停止</div>
         </div>
 
+        <div class="row">
+            <div class="label">模式</div>
+            <div class="value" id="modeText">-</div>
+        </div>
+
         <div class="btns">
             <button onclick="start()">启动</button>
             <button onclick="stop()">停止</button>
+        </div>
+
+        <div class="btns">
+            <button onclick="setManual()">手动模式</button>
+            <button onclick="setAuto()">自动模式</button>
         </div>
 
         <div class="dashboard">
@@ -187,7 +212,7 @@
 
             <div class="card">
                 <div class="label">温度趋势</div>
-                <canvas id="trendChart"></canvas>
+                <div id="trendChart" style="width:100%;height:150px;"></div>
             </div>
 
         </div>
@@ -337,55 +362,75 @@
 
         }
 
-        // 加载3D模型
-        let machine;
-        //let fanPart = null;
-        let fanParts = [];
+        // 加载设备模型
+        const deviceModels = {};
 
-        const loader = new GLTFLoader();
+        // 设备加载注册表
+        const deviceLoaders = {
+            fan: loadFan,
+            sensor: loadSensor
+        };
 
-        loader.load('../models/fan.glb', function (gltf) {
+        // 根据设备ID加载不同模型，放在不同位置
+        // 预设了两台风机
+        function loadFan(deviceId, positionX) {
 
-            machine = gltf.scene;
+            const loader = new GLTFLoader();
 
-            // 输出所有 Mesh 名称，方便确认叶片
-            machine.traverse(child => {
-                if (child.isMesh) console.log("Mesh:", child.name);
+            loader.load('../models/fan.glb', function (gltf) {
+
+                const model = gltf.scene;
+                const fanParts = [];
+
+                // 找叶片
+                model.traverse(child => {
+                    if (child.isMesh && ["Object_40"].includes(child.name)) {
+                        fanParts.push(child);
+                    }
+                });
+
+                // 缩放
+                const box = new THREE.Box3().setFromObject(model);
+                const size = box.getSize(new THREE.Vector3());
+                const scale = 2 / Math.max(size.x, size.y, size.z);
+                model.scale.set(scale, scale, scale);
+
+                // 不同设备不同位置
+                model.position.set(positionX, 0, 0);
+
+                scene.add(model);
+
+                // 存入设备模型表
+                deviceModels[deviceId] = {
+                    model: model,
+                    fanParts: fanParts,
+                    rpm: 0
+                };
+
+                console.log("模型加载完成:", deviceId);
             });
+        }
 
-            // 根据名称选中叶片
-            machine.traverse(child => {
-                if (child.isMesh && ["Object_40"].includes(child.name)) {
-                    fanParts.push(child);
-                    console.log("选中叶片:", child.name);
-                }
-            });
+        // 传感器模型相对简单，直接用一个立方体表示
+        function loadSensor(deviceId, positionX) {
 
-            machine.traverse(child => {
-                if (child.isMesh) {
-                    console.log(child.name, child.geometry.attributes.position.count);
-                }
-            });
+            const geometry = new THREE.BoxGeometry(1, 1, 1);
+            const material = new THREE.MeshStandardMaterial({ color: 0x00aaff });
 
+            const cube = new THREE.Mesh(geometry, material);
 
-            // 计算包围盒
-            const box = new THREE.Box3().setFromObject(machine);
-            const size = box.getSize(new THREE.Vector3());
+            cube.position.set(positionX, 0.5, 0);
 
-            // 获取最大尺寸
-            const maxDim = Math.max(size.x, size.y, size.z);
+            scene.add(cube);
 
-            // 计算缩放比例
-            const scale = 2 / maxDim;
+            deviceModels[deviceId] = {
+                model: cube,
+                rpm: 0
+            };
 
-            machine.scale.set(scale, scale, scale);
+            console.log("Sensor加载完成:", deviceId);
+        }
 
-            // 放在地面上
-            machine.position.set(0, 0, 0);
-
-            scene.add(machine);
-
-        });
 
         // 相机位置
         camera.position.set(0, 3, 12);
@@ -394,6 +439,10 @@
         // 设备转速
         let rpm = 1000;
         let status = "stop";
+        // 多设备数据池
+        const deviceStore = {};
+        let currentDevice = null;
+
         let alarmBlink = false;
         let temperature = 0;
         const socket = new WebSocket("ws://localhost:3000");
@@ -421,129 +470,90 @@
 
         socket.onmessage = function (event) {
 
-            const data = JSON.parse(event.data);
-            console.log("收到数据:", data); // 调试输出
+            const msg = JSON.parse(event.data);
+            console.log("收到数据:", msg);
 
-            if (data.type === "status" && data.deviceId === "fan1") {
+            // 根据消息类型处理
 
-                rpm = data.data.rpm;
-                temperature = data.data.temperature;
+            if (msg.type === "init") {
 
-                const temp = temperature;
+                renderDeviceList(msg.devices);
 
-                // ===== 状态灯 =====
-                const lamp = document.getElementById("lamp");
+                // 动态加载模型
+                msg.devices.forEach((d, index) => {
 
-                lamp.className = "lamp";
+                    const loader = deviceLoaders[d.type];
 
-                if (data.deviceId !== "fan1") return;
-
-                if (data.data.rpm > 0) {
-                    lamp.classList.add("run");
-                } else {
-                    lamp.classList.add("stop");
-                }
-
-                if (temp > 70) {
-                    lamp.classList.add("alarm");
-                }
-
-                // ===== 温度条 =====
-                document.getElementById("tempText").innerText = temp + "℃";
-
-                const percent = Math.min(temp, 100);
-                document.getElementById("tempBar").style.width = percent + "%";
-
-                // ===== 趋势图 =====
-                updateChart(temp);
-
-                // 根据转速更新状态
-                if (rpm > 0) {
-                    status = "run";
-                } else {
-                    status = "stop";
-                }
-
-                // 报警逻辑
-                if (temperature > 70) {
-                    status = "alarm";
-                }
-
-                // UI状态同步（新增）
-                if (status === "run") {
-                    document.getElementById("deviceStatus").innerText = "运行";
-                } else if (status === "stop") {
-                    document.getElementById("deviceStatus").innerText = "停止";
-                } else if (status === "alarm") {
-                    document.getElementById("deviceStatus").innerText = "报警";
-                }
-
-                // 更新设备信息显示
-                document.getElementById("rpm").innerText = rpm;
-                // 新增：温度显示
-                document.getElementById("temp").innerText = temperature;
-
+                    if (loader) {
+                        loader(d.deviceId, index * 10 - 10);
+                    } else {
+                        console.warn("没有对应的loader:", d.type);
+                    }
+                });
             }
+            // 接收设备当前状态，初始化设备数据池
+            if (msg.type === "init_data") {
 
+                msg.devices.forEach(d => {
+                    if (d.data) {
+                        deviceStore[d.deviceId] = d.data;
+                    }
+                });
+
+                console.log("初始化设备状态:", deviceStore);
+            }
+            // 设备列表更新
+            if (msg.type === "device_list_update") {
+                renderDeviceList(msg.devices);
+            }
+            // 实时数据更新
+            if (msg.type === "device_update") {
+
+                const { deviceId, data } = msg;
+
+                deviceStore[deviceId] = data;
+
+                if (deviceId === currentDevice) {
+                    updateUI(data);
+                }
+            }
         };
 
         window.start = function () {
 
-            console.log("点击了启动按钮");
-            const msg = {
+            socket.send(JSON.stringify({
                 type: "control",
-                deviceId: "fan1",
+                deviceId: currentDevice,
                 command: "start"
-            };
-
-            console.log("准备发送:", msg);
-
-            socket.send(JSON.stringify(msg));
-
+            }));
         }
 
         window.stop = function () {
 
             socket.send(JSON.stringify({
                 type: "control",
-                deviceId: "fan1",
+                deviceId: currentDevice,
                 command: "stop"
             }));
-
         }
 
-        // 更新设备颜色
-        function updateMachineColor() {
+        // 模式切换（手动）
+        window.setManual = function () {
+            socket.send(JSON.stringify({
+                type: "control",
+                deviceId: currentDevice,
+                command: "manual"
+            }));
+        };
+        // 模式切换（自动）
+        window.setAuto = function () {
+            socket.send(JSON.stringify({
+                type: "control",
+                deviceId: currentDevice,
+                command: "auto"
+            }));
+        };
 
-            if (!machine) return;
-
-            machine.traverse(function (child) {
-
-                if (child.isMesh) {
-
-                    if (status === "run") {
-                        child.material.color.set(0x00ff00);
-                    }
-
-                    if (status === "stop") {
-                        child.material.color.set(0x888888);
-                    }
-
-                    if (status === "alarm") {
-
-                        if (alarmBlink) {
-                            child.material.color.set(0xff0000); // 红色
-                        } else {
-                            child.material.color.set(0x000000); // 黑色
-                        }
-
-                    }
-
-                }
-
-            });
-
-        }
 
         // 闪烁定时器
         setInterval(function () {
@@ -561,17 +571,29 @@
 
             controls.update();
 
-            // 只旋转叶片
-            if (fanParts.length > 0) {
-                fanParts.forEach(part => {
-                    part.rotation.y += rpm * 0.0001;
+            // 旋转风机叶片
+            Object.keys(deviceModels).forEach(id => {
+
+                const device = deviceModels[id];
+
+                // 只有风机才有 fanParts
+                if (device.fanParts) {
+                    device.fanParts.forEach(part => {
+                        part.rotation.y += device.rpm * 0.0001;
+                    });
+                }
+
+            });
+
+            updateMachineColor();
+            // 选中高亮（黄色）
+            if (selectedObject) {
+                selectedObject.traverse(child => {
+                    if (child.isMesh) {
+                        child.material.color.set(0xffff00);
+                    }
                 });
             }
-
-
-            // 更新设备颜色
-            updateMachineColor();
-
             renderer.render(scene, camera);
 
         }
@@ -589,32 +611,39 @@
 
             raycaster.setFromCamera(mouse, camera);
 
-            const intersects = raycaster.intersectObject(machine, true);
+            const intersects = raycaster.intersectObjects(
+                Object.values(deviceModels).map(d => d.model),
+                true
+            );
 
             if (intersects.length > 0) {
+                const clickedMesh = intersects[0].object;
 
-                const clicked = intersects[0].object;
+                // 找设备ID
+                let selectedDeviceId = null;
 
-                // 恢复之前高亮
-                if (selectedObject) {
-                    selectedObject.material.color.set(0xffffff);
+                Object.keys(deviceModels).forEach(id => {
+                    let obj = clickedMesh;
+
+                    while (obj) {
+                        if (obj === deviceModels[id].model) {
+                            selectedDeviceId = id;
+                            break;
+                        }
+                        obj = obj.parent;
+                    }
+                });
+
+                // 高亮整机
+                if (selectedDeviceId) {
+
+                    const device = deviceModels[selectedDeviceId];
+
+                    // 设置新选中对象
+                    selectedObject = device.model;
+                    // 选中设备后显示其状态，同步UI选中
+                    selectDevice(selectedDeviceId);
                 }
-
-                // 设置新的高亮
-                selectedObject = clicked;
-                selectedObject.material.color.set(0xff0000);
-
-                // 更新设备信息
-                document.getElementById("deviceName").innerText = "矿井风机";
-                document.getElementById("deviceRPM").innerText = rpm;
-
-                if (rpm > 0) {
-                    document.getElementById("deviceStatus").innerText = "运行";
-                    document.getElementById("temp").innerText = temperature;
-                } else {
-                    document.getElementById("deviceStatus").innerText = "停止";
-                }
-
             }
 
         }
@@ -635,10 +664,10 @@
 
             chart.setOption({
                 grid: {
-                    left: "1%",
-                    right: "10%",
+                    left: "10%",     // 给 y轴留空间
+                    right: "5%",
                     top: 20,
-                    bottom: 40,
+                    bottom: 50,      // 给 x轴留空间
                     containLabel: true
                 },
 
@@ -647,13 +676,19 @@
                     boundaryGap: false,
                     axisLabel: {
                         hideOverlap: true
+                    },
+                    axisLine: {
+                        show: true
                     }
                 },
 
                 yAxis: {
                     type: "value",
                     min: 0,
-                    max: 100
+                    max: 100,
+                    axisLabel: {
+                        margin: 10   // 防止贴边
+                    }
                 },
 
                 series: [{
@@ -671,6 +706,172 @@
                 }]
             });
 
+        }
+
+
+        function renderDeviceList(devices) {
+
+            const container = document.getElementById("deviceList");
+            container.innerHTML = "";
+
+            devices.forEach(d => {
+
+                const { deviceId, type } = d;
+
+                const item = document.createElement("div");
+                item.innerText = `${deviceId} (${type})`;
+
+                item.style.cursor = "pointer";
+                item.style.padding = "4px";
+
+                item.onclick = () => selectDevice(deviceId);
+
+                container.appendChild(item);
+            });
+        }
+
+
+        function selectDevice(deviceId) {
+
+            currentDevice = deviceId;
+
+            document.getElementById("deviceName").innerText = deviceId;
+
+            const data = deviceStore[deviceId];
+
+            if (data) {
+                updateUI(data);
+            }
+
+            console.log("当前设备:", deviceId);
+        }
+
+        function updateUI(data) {
+
+            const rpm = data.rpm;
+            const temperature = data.temperature;
+            const temp = temperature;
+
+            // 状态灯
+            const lamp = document.getElementById("lamp");
+            // 先清空所有状态
+            lamp.className = "lamp";
+
+            // 区分设备类型
+            if (currentDevice && currentDevice.startsWith("sensor")) {
+
+                // 传感器默认正常（绿色）
+                lamp.classList.add("run");
+
+            } else {
+
+                // 风机才使用状态
+                if (data.status === "run") {
+                    lamp.classList.add("run");
+                } else if (data.status === "stop") {
+                    lamp.classList.add("stop");
+                } else if (data.status === "alarm") {
+                    lamp.classList.add("alarm");
+                }
+
+            }
+
+
+            // 设备温度（fan）
+            if (data.temperature !== undefined) {
+                document.getElementById("fanTemp").innerText = data.temperature;
+            }
+
+            // 固定使用 sensor1 作为环境温度
+            const sensorData = deviceStore["sensor1"];
+
+            // 温度条改为环境温度
+            if (sensorData) {
+                document.getElementById("tempText").innerText =
+                    sensorData.temperature + "℃";
+
+                document.getElementById("tempBar").style.width =
+                    Math.min(sensorData.temperature, 100) + "%";
+            }
+
+            // UI 上显示环境温度
+            if (sensorData) {
+                document.getElementById("envTemp").innerText = sensorData.temperature;
+            }
+
+            // 图表用环境温度
+            if (sensorData) {
+                updateChart(sensorData.temperature);
+            }
+
+            // 状态
+            status = data.status;
+            // 区分设备类型
+            if (currentDevice && currentDevice.startsWith("sensor")) {
+
+                // 传感器状态统一显示
+                document.getElementById("deviceStatus").innerText = "正常";
+
+            } else {
+
+                // 风机状态
+                document.getElementById("deviceStatus").innerText =
+                    status === "run" ? "运行" :
+                        status === "stop" ? "停止" : "报警";
+
+            }
+            // 模式
+            if (data.mode) {
+                document.getElementById("modeText").innerText =
+                    data.mode === "auto" ? "自动" : "手动";
+            }
+
+            if (rpm !== undefined) {
+                document.getElementById("rpm").innerText = rpm;
+            } else {
+                document.getElementById("rpm").innerText = "-";
+            }
+
+            // 更新设备模型数据
+            if (currentDevice && deviceModels[currentDevice]) {
+
+                if (data.rpm !== undefined) {
+                    deviceModels[currentDevice].rpm = data.rpm;
+                }
+
+                if (data.status !== undefined) {
+                    deviceModels[currentDevice].status = data.status; // 将状态存入设备模型数据中
+                }
+
+            }
+        }
+
+        // 更新设备颜色
+        function updateMachineColor() {
+
+            Object.keys(deviceModels).forEach(id => {
+
+                const device = deviceModels[id];
+
+                device.model.traverse(child => {
+
+                    if (child.isMesh) {
+
+                        if (device.status === "run") {
+                            child.material.color.set(0x00ff00); // 绿色
+                        }
+                        else if (device.status === "stop") {
+                            child.material.color.set(0x888888); // 灰色
+                        }
+                        else if (device.status === "alarm") {
+                            child.material.color.set(0xff0000); // 红色
+                        }
+
+                    }
+
+                });
+
+            });
         }
     </script>
 

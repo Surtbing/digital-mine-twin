@@ -5,7 +5,9 @@ const wss = new WebSocket.Server({ port: 3000 });
 
 console.log("WebSocket server started: ws://localhost:3000");
 
-let devices = new Map();    // 设备列表
+// 维护一个 Map 来存储设备连接和状态
+let devices = new Map();
+// 维护一个 Set 来存储所有网页客户端连接
 let webClients = new Set();
 
 wss.on('connection', function (ws) {
@@ -20,22 +22,73 @@ wss.on('connection', function (ws) {
 
         // 设备连接
         if (data.type === "device") {
-            devices.set(data.deviceId, ws);
+
+            devices.set(data.deviceId, {
+                ws: ws,
+                deviceType: data.deviceType || "unknown",
+                lastData: null
+            });
+
             console.log("设备上线:", data.deviceId);
+
+            // 新增：通知所有网页
+            webClients.forEach(client => {
+                client.send(JSON.stringify({
+                    type: "device_list_update",
+                    devices: Array.from(devices.entries()).map(([id, d]) => ({
+                        deviceId: id,
+                        type: d.deviceType
+                    }))
+                }));
+            });
             return;
         }
+
         // 网页连接
         if (data.type === "web") {
-            webClients.add(ws);
+            webClients.add(ws); // 将网页连接加入 Set
+
             console.log("网页连接");
+
+            // 1️发送设备列表
+            ws.send(JSON.stringify({
+                type: "init",
+                devices: Array.from(devices.entries()).map(([id, d]) => ({
+                    deviceId: id,
+                    type: d.deviceType
+                }))
+            }));
+
+            // 2️发送设备当前状态（关键新增）
+            ws.send(JSON.stringify({
+                type: "init_data",
+                devices: Array.from(devices.entries()).map(([id, d]) => ({
+                    deviceId: id,
+                    data: d.lastData
+                }))
+            }));
+
             return;
         }
 
         // 设备状态 → 发给浏览器
         if (data.type === "status") {
 
+            const device = devices.get(data.deviceId);
+
+            if (device) {
+                device.lastData = data.data; // 🔥 保存数据
+            }
+
+            // 统一转发格式
+            const msg = {
+                type: "device_update",
+                deviceId: data.deviceId,
+                data: data.data
+            };
+
             webClients.forEach(client => {
-                client.send(JSON.stringify(data));
+                client.send(JSON.stringify(msg));
             });
 
         }
@@ -45,13 +98,16 @@ wss.on('connection', function (ws) {
 
             const target = devices.get(data.deviceId);
 
+            // 发送控制命令给设备
             if (target) {
-                target.send(JSON.stringify(data));
-                console.log("控制发送到:", data.deviceId);
-            } else {
-                console.log("设备不存在:", data.deviceId);
-            }
+                target.ws.send(JSON.stringify({
+                    type: "control",
+                    deviceId: data.deviceId,
+                    command: data.command
+                }));
 
+                console.log("控制发送到:", data.deviceId);
+            }
         }
 
     });
@@ -61,16 +117,32 @@ wss.on('connection', function (ws) {
 
         console.log("连接关闭");
 
+        let removedDevice = null; // 标记是否有设备下线
+
         // 删除设备
         devices.forEach((value, key) => {
-            if (value === ws) {
+            if (value.ws === ws) {
                 devices.delete(key);
+                removedDevice = key; // 记录下线设备
                 console.log("设备下线:", key);
             }
         });
 
         // 删除网页
         webClients.delete(ws);
+
+        // 通知前端更新设备列表
+        if (removedDevice) {
+            webClients.forEach(client => {
+                client.send(JSON.stringify({
+                    type: "device_list_update",
+                    devices: Array.from(devices.entries()).map(([id, d]) => ({
+                        deviceId: id,
+                        type: d.deviceType
+                    }))
+                }));
+            });
+        }
 
     });
 

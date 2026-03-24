@@ -24,8 +24,10 @@
             font-family: Arial;
             font-size: 13px;
 
-            max-height: 90vh;   /* 限制最大高度 */
-            overflow-y: auto;   /* 面板内部滚动 */
+            max-height: 90vh;
+            /* 限制最大高度 */
+            overflow-y: auto;
+            /* 面板内部滚动 */
         }
 
         .title {
@@ -196,6 +198,19 @@
         </div>
 
         <div class="dashboard">
+            <div class="card">
+                <div class="label">设备管理</div>
+
+                <div class="btns">
+                    <button onclick="addFan()">➕ 风机</button>
+                    <button onclick="addSensor()">➕ 传感器</button>
+                </div>
+
+                <div class="btns">
+                    <button onclick="removeDevice()">❌ 删除</button>
+                    <button onclick="clearDevices()">🧹 清空</button>
+                </div>
+            </div>
 
             <div class="card">
                 <div class="label">状态灯</div>
@@ -365,6 +380,38 @@
         // 加载设备模型
         const deviceModels = {};
 
+        // 删除设备模型函数
+        function removeModel(deviceId) {
+
+            const device = deviceModels[deviceId];
+
+            if (device) {
+
+                // 1 从 Three.js 场景删除
+                scene.remove(device.model);
+
+                // 2 释放内存（防止卡顿）
+                device.model.traverse(child => {
+                    if (child.isMesh) {
+                        child.geometry.dispose();
+
+                        if (child.material) {
+                            if (Array.isArray(child.material)) {
+                                child.material.forEach(m => m.dispose());
+                            } else {
+                                child.material.dispose();
+                            }
+                        }
+                    }
+                });
+
+                // 3 删除记录
+                delete deviceModels[deviceId];
+
+                console.log("模型已删除:", deviceId);
+            }
+        }
+
         // 设备加载注册表
         const deviceLoaders = {
             fan: loadFan,
@@ -475,6 +522,7 @@
 
             // 根据消息类型处理
 
+            // 1 初始化设备列表和模型
             if (msg.type === "init") {
 
                 renderDeviceList(msg.devices);
@@ -491,7 +539,8 @@
                     }
                 });
             }
-            // 接收设备当前状态，初始化设备数据池
+
+            // 2 接收设备当前状态，初始化设备数据池
             if (msg.type === "init_data") {
 
                 msg.devices.forEach(d => {
@@ -502,11 +551,27 @@
 
                 console.log("初始化设备状态:", deviceStore);
             }
-            // 设备列表更新
+
+            // 3 设备列表更新
             if (msg.type === "device_list_update") {
+
                 renderDeviceList(msg.devices);
+
+                msg.devices.forEach((d, index) => {
+
+                    // 如果模型不存在才加载（防重复）
+                    if (!deviceModels[d.deviceId]) {
+
+                        const loader = deviceLoaders[d.type];
+
+                        if (loader) {
+                            loader(d.deviceId, index * 10 - 10);
+                        }
+                    }
+                });
             }
-            // 实时数据更新
+
+            // 4 实时数据更新
             if (msg.type === "device_update") {
 
                 const { deviceId, data } = msg;
@@ -516,6 +581,16 @@
                 if (deviceId === currentDevice) {
                     updateUI(data);
                 }
+            }
+
+            // 5 删除设备
+            if (msg.type === "remove_device") {
+
+                const deviceId = msg.deviceId;
+
+                console.log("删除设备模型:", deviceId);
+
+                removeModel(deviceId);
             }
         };
 
@@ -551,6 +626,45 @@
                 type: "control",
                 deviceId: currentDevice,
                 command: "auto"
+            }));
+        };
+
+        // ================== 设备管理 ==================
+
+        // 添加风机
+        window.addFan = function () {
+            socket.send(JSON.stringify({
+                type: "add_device",
+                deviceType: "fan"
+            }));
+        };
+
+        // 添加传感器
+        window.addSensor = function () {
+            socket.send(JSON.stringify({
+                type: "add_device",
+                deviceType: "sensor"
+            }));
+        };
+
+        // 删除当前设备
+        window.removeDevice = function () {
+
+            if (!currentDevice) {
+                alert("请先选择设备");
+                return;
+            }
+
+            socket.send(JSON.stringify({
+                type: "remove_device",
+                deviceId: currentDevice
+            }));
+        };
+
+        // 清空全部设备
+        window.clearDevices = function () {
+            socket.send(JSON.stringify({
+                type: "clear_devices"
             }));
         };
 

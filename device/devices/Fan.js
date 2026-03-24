@@ -7,7 +7,6 @@ class Fan extends Device {
         super(deviceId, ws);
 
         this.rpm = 0;
-        this.targetRpm = 0;
         this.temperature = 25;
 
         this.status = "stop";
@@ -38,36 +37,28 @@ class Fan extends Device {
     }
 
     start() {
-        this.targetRpm = 1200;
+        this.status = "run";
     }
 
     stop() {
-        this.targetRpm = 0;
+        this.status = "stop";
     }
 
-    update() {
+    update(env) {
 
-        // 转速渐变
-        if (this.rpm < this.targetRpm) this.rpm += 20;
-        if (this.rpm > this.targetRpm) this.rpm -= 20;
+        // 状态驱动 RPM
+        if (this.status === "run") this.rpm += 20;
+        if (this.status === "stop") this.rpm -= 30;
 
-        // 温度模型
-        const ambient = 25;
-        let heat = this.rpm * 0.002;
-        let cooling = (this.temperature - ambient) * 0.05;
+        // 限制范围
+        this.rpm = Math.max(0, Math.min(1200, this.rpm));
 
-        this.temperature += heat - cooling;
+        // 🔥 核心：受环境影响
+        this.temperature = env.temperature + this.rpm * 0.01;
 
-        this.temperature = Math.max(20, Math.min(90, this.temperature));
-
-        // 状态判断
+        // 报警逻辑
         if (this.temperature > 70) {
-            // 温度过高，进入报警状态
             this.status = "alarm";
-        } else if (this.rpm > 0) {
-            this.status = "run";
-        } else {
-            this.status = "stop";
         }
 
         // 上报
@@ -75,10 +66,9 @@ class Fan extends Device {
             rpm: Math.round(this.rpm),
             temperature: Math.round(this.temperature),
             status: this.status,
-            mode: this.mode   
+            mode: this.mode
         });
     }
-
 }
 
 // 自注册

@@ -9,16 +9,13 @@ class Sensor extends Device {
         this.temperature = 25; // 初始温度
     }
 
-    start() {}
-    stop() {}
+    start() { }
+    stop() { }
 
-    update() {
+    update(env) {
 
-        // 模拟环境温度波动
-        const fluctuation = (Math.random() - 0.5) * 2; // -1 到 +1 之间的随机数
-        this.temperature += fluctuation;
-
-        this.temperature = Math.max(15, Math.min(40, this.temperature)); // 温度限制在15-40度之间
+        // 从环境读取温度（核心改造）
+        this.temperature = env.temperature;
 
         this.sendStatus({
             temperature: Math.round(this.temperature)

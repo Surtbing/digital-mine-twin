@@ -32,29 +32,40 @@ ws.on('open', () => {
         type: "manager"
     }));
 
-    // 创建多个设备
-    registerDevice("fan1", "fan");
-    registerDevice("fan2", "fan");
-    registerDevice("sensor1", "sensor");
+    // 创建多个设备（延迟发送设备）
+    setTimeout(() => {
+
+        registerDevice("fan1", "fan", -10, 0);
+        registerDevice("fan2", "fan", 10, 0);
+        registerDevice("sensor1", "sensor", 0, 0);
+
+    }, 300);
 
 });
 
 // 注册设备函数
-function registerDevice(deviceId, type) {
+function registerDevice(deviceId, type, x = 0, z = 0) {
 
     // 1 告诉服务器：我上线了
     ws.send(JSON.stringify({
         type: "device",
         deviceId: deviceId,
-        deviceType: type
+        deviceType: type,
+        x: x,
+        z: z
     }));
 
     // 2 本地创建设备实例
     const device = createDevice(type, deviceId, ws);
 
+    // 3 设置位置（核心新增）
+    device.x = x;
+    device.z = z;
+
     devices.set(deviceId, device);
 
     console.log("设备注册:", deviceId);
+    console.log(`设备上线: ${deviceId} 位置: ${x.toFixed(1)} ${z.toFixed(1)}`);
 }
 
 // 接收服务器控制命令
@@ -71,7 +82,11 @@ ws.on('message', (message) => {
 
         console.log("新增设备:", id);
 
-        registerDevice(id, data.deviceType);
+        // 随机位置（核心新增）
+        const x = Math.floor(Math.random() * 40 - 20);
+        const z = 0;
+
+        registerDevice(id, data.deviceType, x, z);
     }
 
     // 2 控制命令（来自网页）
@@ -84,7 +99,22 @@ ws.on('message', (message) => {
         }
     }
 
-    // 3 删除设备（来自网页）
+
+    // 3 更新设备位置（来自网页）
+    if (data.type === "update_position") {
+
+        const device = devices.get(data.deviceId);
+
+        if (device) {
+            device.x = data.x;
+            device.z = data.z;
+
+            console.log("设备位置已更新:", data.deviceId, data.x, data.z);
+        }
+    }
+
+
+    // 4 删除设备（来自网页）
     if (data.type === "remove_device") {
 
         const device = devices.get(data.deviceId);

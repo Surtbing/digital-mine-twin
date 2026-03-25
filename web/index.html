@@ -145,6 +145,10 @@
 
         <div class="title">设备监控中心</div>
 
+        <div class="btns">
+            <button id="editBtn" onclick="setEditMode()">编辑模式</button>
+            <button id="runBtn" onclick="setRunMode()">运行模式</button>
+        </div>
 
         <!-- 设备列表 -->
         <div class="card">
@@ -183,8 +187,13 @@
         </div>
 
         <div class="row">
-            <div class="label">模式</div>
-            <div class="value" id="modeText">-</div>
+            <div class="label">系统模式</div>
+            <div class="value" id="systemMode">运行模式</div>
+        </div>
+
+        <div class="row">
+            <div class="label">控制模式</div>
+            <div class="value" id="deviceMode">-</div>
         </div>
 
         <div class="btns">
@@ -247,6 +256,48 @@
         import { GLTFLoader } from "https://cdn.jsdelivr.net/npm/three@0.158/examples/jsm/loaders/GLTFLoader.js";
         import { OrbitControls } from "https://cdn.jsdelivr.net/npm/three@0.158/examples/jsm/controls/OrbitControls.js";
 
+        let editMode = false;
+
+        // 进入编辑模式
+        window.setEditMode = function () {
+            editMode = true;
+
+            document.getElementById("systemMode").innerText = "布局编辑";
+
+            updateModeUI();
+
+            console.log("当前模式：编辑模式");
+        };
+
+        // 进入运行模式
+        window.setRunMode = function () {
+            editMode = false;
+
+            document.getElementById("systemMode").innerText = "运行模式";
+
+            updateModeUI();
+
+            console.log("当前模式：运行模式");
+        };
+
+        // 按钮高亮
+        function updateModeUI() {
+
+            const editBtn = document.getElementById("editBtn");
+            const runBtn = document.getElementById("runBtn");
+
+            if (!editBtn || !runBtn) return;
+
+            if (editMode) {
+                editBtn.style.background = "#00d4ff";
+                runBtn.style.background = "#2a3442";
+            } else {
+                runBtn.style.background = "#00d4ff";
+                editBtn.style.background = "#2a3442";
+            }
+        }
+
+
         // 创建场景
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x444444);
@@ -272,12 +323,16 @@
         // 当前选中的对象
         let selectedObject = null;
 
+        // 拖拽控制变量
+        let isDragging = false;
+        let dragObject = null;
+
         // 添加轨道控制器
-        const controls = new OrbitControls(camera, renderer.domElement);
+        //const controls = new OrbitControls(camera, renderer.domElement);
 
         // 启用阻尼效果
-        controls.enableDamping = true;
-        controls.dampingFactor = 0.05;
+        //controls.enableDamping = true;
+        //controls.dampingFactor = 0.05;
 
         // 加载纹理
         const textureLoader = new THREE.TextureLoader();
@@ -420,7 +475,7 @@
 
         // 根据设备ID加载不同模型，放在不同位置
         // 预设了两台风机
-        function loadFan(deviceId, positionX) {
+        function loadFan(deviceId, x, z) {
 
             const loader = new GLTFLoader();
 
@@ -443,7 +498,7 @@
                 model.scale.set(scale, scale, scale);
 
                 // 不同设备不同位置
-                model.position.set(positionX, 0, 0);
+                model.position.set(x, 0, z);
 
                 scene.add(model);
 
@@ -459,14 +514,14 @@
         }
 
         // 传感器模型相对简单，直接用一个立方体表示
-        function loadSensor(deviceId, positionX) {
+        function loadSensor(deviceId, x, z) {
 
             const geometry = new THREE.BoxGeometry(1, 1, 1);
             const material = new THREE.MeshStandardMaterial({ color: 0x00aaff });
 
             const cube = new THREE.Mesh(geometry, material);
 
-            cube.position.set(positionX, 0.5, 0);
+            cube.position.set(x, 0.5, z);
 
             scene.add(cube);
 
@@ -480,8 +535,7 @@
 
 
         // 相机位置
-        camera.position.set(0, 3, 12);
-        camera.lookAt(0, 2, 0);
+        camera.position.set(0, 2, 5);
 
         // 设备转速
         let rpm = 1000;
@@ -492,7 +546,78 @@
 
         let alarmBlink = false;
         let temperature = 0;
+
+        // WebSocket连接
         const socket = new WebSocket("ws://localhost:3000");
+
+        // 第一人称控制变量
+        let moveForward = false;
+        let moveBackward = false;
+        let moveLeft = false;
+        let moveRight = false;
+        let moveUp = false;
+        let moveDown = false;
+
+        let velocity = new THREE.Vector3();
+        let direction = new THREE.Vector3();
+
+        let yaw = 0;   // 左右旋转
+        let pitch = 0; // 上下视角
+
+        const speed = 0.1;
+        const mouseSensitivity = 0.002;
+
+        // 点击锁定鼠标
+        document.addEventListener("click", () => {
+            document.body.requestPointerLock();
+        });
+
+        // 鼠标移动控制视角
+        document.addEventListener("mousemove", (event) => {
+
+            // 没锁定鼠标就不执行
+            if (document.pointerLockElement !== document.body) return;
+
+            yaw -= event.movementX * mouseSensitivity;
+            pitch -= event.movementY * mouseSensitivity;
+
+            // 限制上下角度（防止翻转）
+            pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, pitch));
+
+            camera.rotation.order = "YXZ";
+            camera.rotation.y = yaw;
+            camera.rotation.x = pitch;
+
+        });
+
+
+        // 按键按下
+        document.addEventListener("keydown", (event) => {
+
+            switch (event.code) {
+                case "KeyW": moveForward = true; break;
+                case "KeyS": moveBackward = true; break;
+                case "KeyA": moveLeft = true; break;
+                case "KeyD": moveRight = true; break;
+                case "Space": moveUp = true; break;
+                case "ShiftLeft": moveDown = true; break;
+            }
+
+        });
+
+        // 按键松开
+        document.addEventListener("keyup", (event) => {
+
+            switch (event.code) {
+                case "KeyW": moveForward = false; break;
+                case "KeyS": moveBackward = false; break;
+                case "KeyA": moveLeft = false; break;
+                case "KeyD": moveRight = false; break;
+                case "Space": moveUp = false; break;
+                case "ShiftLeft": moveDown = false; break;
+            }
+
+        });
 
         socket.onopen = function () {
             console.log("网页已连接服务器");
@@ -520,6 +645,8 @@
             const msg = JSON.parse(event.data);
             console.log("收到数据:", msg);
 
+            console.log("msg内容:", msg);
+
             // 根据消息类型处理
 
             // 1 初始化设备列表和模型
@@ -533,7 +660,7 @@
                     const loader = deviceLoaders[d.type];
 
                     if (loader) {
-                        loader(d.deviceId, index * 10 - 10);
+                        loader(d.deviceId, d.x, d.z);
                     } else {
                         console.warn("没有对应的loader:", d.type);
                     }
@@ -565,7 +692,7 @@
                         const loader = deviceLoaders[d.type];
 
                         if (loader) {
-                            loader(d.deviceId, index * 10 - 10);
+                            loader(d.deviceId, d.x, d.z);
                         }
                     }
                 });
@@ -574,10 +701,21 @@
             // 4 实时数据更新
             if (msg.type === "device_update") {
 
-                const { deviceId, data } = msg;
+                const { deviceId, data, x, z } = msg;
 
+                console.log("更新位置:", deviceId, x, z);
+
+                // 更新状态
                 deviceStore[deviceId] = data;
 
+                // 核心：更新模型位置
+                const device = deviceModels[deviceId];
+
+                if (device && x !== undefined && z !== undefined) {
+                    device.model.position.set(x, device.model.position.y, z);
+                }
+
+                // 更新 UI
                 if (deviceId === currentDevice) {
                     updateUI(data);
                 }
@@ -683,7 +821,29 @@
 
             requestAnimationFrame(animate);
 
-            controls.update();
+            // 方向计算
+            direction.z = Number(moveForward) - Number(moveBackward);
+            direction.x = Number(moveRight) - Number(moveLeft);
+            direction.y = Number(moveUp) - Number(moveDown);
+
+            direction.normalize();
+
+            // 前后移动（基于视角）
+            if (moveForward || moveBackward) {
+                camera.translateZ(-direction.z * speed);
+            }
+
+            // 左右移动
+            if (moveLeft || moveRight) {
+                camera.translateX(direction.x * speed);
+            }
+
+            // 上下移动
+            if (moveUp || moveDown) {
+                camera.position.y += direction.y * speed;
+            }
+
+            //controls.update();
 
             // 旋转风机叶片
             Object.keys(deviceModels).forEach(id => {
@@ -716,6 +876,91 @@
 
         // 鼠标点击事件处理
         window.addEventListener("click", onMouseClick);
+
+        // 拖拽事件处理 鼠标摁下开始拖拽
+        window.addEventListener("mousedown", (event) => {
+
+            if (!editMode) return; // 核心限制
+
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+
+            const intersects = raycaster.intersectObjects(
+                Object.values(deviceModels).map(d => d.model),
+                true
+            );
+
+            if (intersects.length > 0) {
+
+                let obj = intersects[0].object;
+
+                // 找顶层模型
+                while (obj.parent && obj.parent.type !== "Scene") {
+                    obj = obj.parent;
+                }
+
+                dragObject = obj;
+                isDragging = true;
+            }
+        });
+
+        // 鼠标移动（拖拽中）
+        window.addEventListener("mousemove", (event) => {
+
+            if (!editMode || !isDragging || !dragObject) return;
+
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+
+            // 与地面相交（y=0平面）
+            const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+            const point = new THREE.Vector3();
+
+            raycaster.ray.intersectPlane(plane, point);
+
+            if (point) {
+                dragObject.position.x = point.x;
+                dragObject.position.z = point.z;
+            }
+        });
+
+        // 鼠标松开（结束拖拽 + 同步）
+        window.addEventListener("mouseup", () => {
+
+            if (!editMode || !isDragging || !dragObject) return;
+
+            isDragging = false;
+
+            // 找 deviceId
+            let deviceId = null;
+
+            Object.keys(deviceModels).forEach(id => {
+                if (deviceModels[id].model === dragObject) {
+                    deviceId = id;
+                }
+            });
+
+            if (deviceId) {
+
+                const pos = dragObject.position;
+
+                console.log("发送新位置:", deviceId, pos.x, pos.z);
+
+                // 发送给服务器
+                socket.send(JSON.stringify({
+                    type: "update_position",
+                    deviceId: deviceId,
+                    x: pos.x,
+                    z: pos.z
+                }));
+            }
+
+            dragObject = null;
+        });
 
         // 点击检测函数
         function onMouseClick(event) {
@@ -936,7 +1181,7 @@
             }
             // 模式
             if (data.mode) {
-                document.getElementById("modeText").innerText =
+                document.getElementById("deviceMode").innerText =
                     data.mode === "auto" ? "自动" : "手动";
             }
 

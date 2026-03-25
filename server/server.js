@@ -35,13 +35,19 @@ wss.on('connection', function (ws) {
         // 1 设备连接
         if (data.type === "device") {
 
+            console.log("存入位置:", data.deviceId, data.x, data.z);
+
             devices.set(data.deviceId, {
                 ws: ws,
                 deviceType: data.deviceType || "unknown",
+
+                x: data.x || 0,
+                z: data.z || 0,
+
                 instance: null
             });
 
-            console.log("设备上线:", data.deviceId);
+            console.log("设备上线:", data.deviceId, "位置:", data.x, data.z);
 
             broadcastDeviceList(); // 广播设备列表更新
             return;
@@ -58,7 +64,9 @@ wss.on('connection', function (ws) {
                 type: "init",
                 devices: Array.from(devices.entries()).map(([id, d]) => ({
                     deviceId: id,
-                    type: d.deviceType
+                    type: d.deviceType,
+                    x: d.x,
+                    z: d.z
                 }))
             }));
 
@@ -72,10 +80,17 @@ wss.on('connection', function (ws) {
 
             if (!device) return;
 
+            console.log("广播数据:", data.deviceId, device.x, device.z);
+
+
             // 更新 UI 数据（来自 Fan）
             broadcast({
                 type: "device_update",
                 deviceId: data.deviceId,
+
+                x: device.x,
+                z: device.z,
+
                 data: {
                     rpm: data.data.rpm,
                     temperature: data.data.temperature,
@@ -110,7 +125,42 @@ wss.on('connection', function (ws) {
             }
         }
 
-        // 5 新增设备
+        // 5 位置更新 → 发给浏览器（位置更新）
+        if (data.type === "update_position") {
+
+            const device = devices.get(data.deviceId);
+
+            if (!device) return;
+
+            // 1 更新服务器记录
+            device.x = data.x;
+            device.z = data.z;
+
+            console.log("位置更新:", data.deviceId, data.x, data.z);
+
+            // 2 转发给设备管理器
+            if (manager) {
+                manager.send(JSON.stringify({
+                    type: "update_position",
+                    deviceId: data.deviceId,
+                    x: data.x,
+                    z: data.z
+                }));
+            }
+
+            // 3 广播给所有网页客户端
+            broadcast({
+                type: "device_update",
+                deviceId: data.deviceId,
+                x: data.x,
+                z: data.z,
+                data: {} // 不改状态
+            });
+
+            return;
+        }
+
+        // 6 新增设备
         if (data.type === "add_device") {
 
             console.log("转发新增设备请求:", data.deviceType);
@@ -129,7 +179,7 @@ wss.on('connection', function (ws) {
             return;
         }
 
-        // 6 删除设备
+        // 7 删除设备
         if (data.type === "remove_device") {
 
             console.log("转发删除设备请求:", data.deviceId);
@@ -147,7 +197,7 @@ wss.on('connection', function (ws) {
 
         }
 
-        // 7 设备真正删除（manager → server → 所有前端）
+        // 8 设备真正删除（manager → server → 所有前端）
         if (data.type === "device_removed") {
 
             console.log("设备真正删除:", data.deviceId);
@@ -167,7 +217,7 @@ wss.on('connection', function (ws) {
             return;
         }
 
-        // 8 清空设备
+        // 9 清空设备
         if (data.type === "clear_devices") {
             devices.clear();
             console.log("清空所有设备");
@@ -215,7 +265,9 @@ function broadcastDeviceList() {
         type: "device_list_update",
         devices: Array.from(devices.entries()).map(([id, d]) => ({
             deviceId: id,
-            type: d.deviceType
+            type: d.deviceType,
+            x: d.x,
+            z: d.z
         }))
     });
 

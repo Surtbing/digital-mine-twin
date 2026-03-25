@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>Monitor HMI</title>
+</head>
+
+<body>
+    <h1> 工业监控系统 HMI</h1>
+
+    <div id="deviceContainer"></div>
+
+    <div style="margin-top:20px;">
+        <button onclick="send('start')">启动</button>
+        <button onclick="send('stop')">停止</button>
+        <button onclick="send('auto')">自动</button>
+    </div>
+
+    <style>
+        body {
+            font-family: Arial;
+            background: #0f172a;
+            color: #e2e8f0;
+            margin: 0;
+            padding: 20px;
+        }
+
+        h1 {
+            margin-bottom: 20px;
+        }
+
+        #deviceContainer {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 16px;
+        }
+
+        /* 设备卡片 */
+        .card {
+            background: #1e293b;
+            border-radius: 12px;
+            padding: 16px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+            transition: 0.3s;
+        }
+
+        .card:hover {
+            transform: translateY(-3px);
+        }
+
+        .card.selected {
+            border: 2px solid #38bdf8;
+            box-shadow: 0 0 12px rgba(56, 189, 248, 0.5);
+        }
+
+        /* 状态灯 */
+        .status {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+
+        .run {
+            background: #22c55e;
+        }
+
+        .stop {
+            background: #64748b;
+        }
+
+        .alarm {
+            background: #ef4444;
+        }
+
+        .title {
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+    </style>
+
+    <script>
+        const ws = new WebSocket("ws://localhost:3000");
+
+        let devices = {}; // 设备数据映射表
+        let selectedDeviceId = null; // 当前选中设备ID
+
+        ws.onopen = () => {
+            ws.send(JSON.stringify({
+                type: "web"
+            }));
+        };
+
+        ws.onmessage = (event) => {
+
+            const msg = JSON.parse(event.data);
+            console.log("msg内容:", msg);
+
+            // 1 初始化设备列表
+            if (msg.type === "init") {
+                msg.devices.forEach(d => {
+                    devices[d.deviceId] = d;
+                });
+
+                render();
+            }
+
+            // 2 实时更新
+            if (msg.type === "device_update") {
+
+                const id = msg.deviceId;
+
+                devices[id] = {
+                    ...devices[id],
+
+                    // 位置数据
+                    x: msg.x,
+                    z: msg.z,
+
+                    // 展开设备数据
+                    ...msg.data
+                };
+
+                console.log("更新设备:", id, devices[id]); // 🔥调试用
+
+                render();
+            }
+
+            // 3 列表更新（新增/删除）
+            if (msg.type === "device_list_update") {
+
+                const newMap = {};
+
+                msg.devices.forEach(d => {
+                    newMap[d.deviceId] = {
+                        ...devices[d.deviceId],
+                        ...d
+                    };
+                });
+
+                devices = newMap;
+
+                render();
+            }
+        };
+
+        // 渲染设备列表
+        function render() {
+
+            const container = document.getElementById("deviceContainer");
+            container.innerHTML = "";
+
+            Object.values(devices).forEach(d => {
+
+                const div = document.createElement("div");
+                div.className = "card" + (selectedDeviceId === d.deviceId ? " selected" : "");
+
+                div.onclick = () => {
+                    selectedDeviceId = d.deviceId;
+                    render();
+                };
+
+                // ✅ 处理状态（关键）
+                const statusClass = d.status
+                    ? d.status
+                    : (d.type === "sensor" ? "run" : "stop");
+
+                div.innerHTML = `
+    <div class="title">
+        <span class="status ${statusClass}"></span>
+        ${d.deviceId}
+    </div>
+
+    <div>RPM: ${d.rpm ?? "--"}</div>
+    <div>温度: ${d.temperature ?? "--"}°C</div>
+    <div>状态: ${d.status ?? (d.type === "sensor" ? "normal" : "--")}</div>
+`;
+
+                container.appendChild(div);
+            });
+        }
+
+        function send(cmd) {
+
+            if (!selectedDeviceId) return;
+
+            ws.send(JSON.stringify({
+                type: "control",
+                deviceId: selectedDeviceId,
+                command: cmd
+            }));
+        }
+    </script>
+</body>
+
+</html>

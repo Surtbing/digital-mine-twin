@@ -211,13 +211,13 @@
                 <div class="label">设备管理</div>
 
                 <div class="btns">
-                    <button onclick="addFan()">➕ 风机</button>
-                    <button onclick="addSensor()">➕ 传感器</button>
+                    <button onclick="addFan()">添加风机</button>
+                    <button onclick="addSensor()">添加传感器</button>
                 </div>
 
                 <div class="btns">
-                    <button onclick="removeDevice()">❌ 删除</button>
-                    <button onclick="clearDevices()">🧹 清空</button>
+                    <button onclick="removeDevice()">删除设备</button>
+                    <button onclick="clearDevices()">清空设备</button>
                 </div>
             </div>
 
@@ -326,13 +326,6 @@
         // 拖拽控制变量
         let isDragging = false;
         let dragObject = null;
-
-        // 添加轨道控制器
-        //const controls = new OrbitControls(camera, renderer.domElement);
-
-        // 启用阻尼效果
-        //controls.enableDamping = true;
-        //controls.dampingFactor = 0.05;
 
         // 加载纹理
         const textureLoader = new THREE.TextureLoader();
@@ -506,11 +499,115 @@
                 deviceModels[deviceId] = {
                     model: model,
                     fanParts: fanParts,
-                    rpm: 0
+                    rpm: 0,
+
+                    duct: null,   // 风筒引用
+                    arrow: null   // 风流箭头
                 };
 
+                // 等模型完全进入场景后，再创建风筒和箭头
+                setTimeout(() => {
+                    createFanDuct(deviceId);
+                    createFanArrow(deviceId);
+                }, 100);
                 console.log("模型加载完成:", deviceId);
             });
+        }
+
+        // 创建风筒（简单的圆柱体分段组成），绑定到风机位置
+        function createFanDuct(deviceId) {
+
+            const device = deviceModels[deviceId];
+            if (!device) return;
+
+            const fanPos = device.model.position;
+
+            const length = 30;          // 风筒长度（工程建议 20~50）
+            const radius = 0.5;
+            const segmentCount = 20;
+            const segmentLength = length / segmentCount;
+
+            const group = new THREE.Group();
+
+            let offset = 0;
+
+            for (let i = 0; i < segmentCount; i++) {
+
+                const geometry = new THREE.CylinderGeometry(
+                    radius,
+                    radius,
+                    segmentLength,
+                    16,
+                    1,
+                    true
+                );
+
+                const texture = new THREE.TextureLoader().load('../textures/rock1.jpg');
+
+                texture.wrapS = THREE.RepeatWrapping;
+                texture.wrapT = THREE.RepeatWrapping;
+                texture.repeat.set(10, 1);
+
+                const material = new THREE.MeshStandardMaterial({
+                    map: texture,
+                    transparent: true,
+                    side: THREE.DoubleSide
+                });
+
+                const segment = new THREE.Mesh(geometry, material);
+
+                // 横向（沿X轴）
+                segment.rotation.z = Math.PI / 2;
+
+                // 从风机位置向前延伸
+                segment.position.x = offset + segmentLength / 2;
+
+                offset += segmentLength;
+
+                group.add(segment);
+
+                segment.userData.flowTexture = texture;
+            }
+
+            // 风筒起点 = 风机位置
+            group.position.set(fanPos.x, 2.8, fanPos.z);
+
+            scene.add(group);
+
+            // 绑定到风机
+            device.duct = group;
+
+            console.log("风筒已创建:", deviceId);
+        }
+
+        function createFanArrow(deviceId) {
+
+            const device = deviceModels[deviceId];
+            if (!device) return;
+
+            const geometry = new THREE.ConeGeometry(0.2, 0.8, 16);
+
+            const material = new THREE.MeshBasicMaterial({
+                color: 0x00ffff
+            });
+
+            const arrow = new THREE.Mesh(geometry, material);
+
+            // 指向X轴正方向（风流方向）
+            arrow.rotation.z = -Math.PI / 2;
+
+            // 初始位置 = 风机位置
+            arrow.position.copy(device.model.position);
+
+            scene.add(arrow);
+
+            // 绑定到风机
+            device.arrow = arrow;
+
+            // 风流移动位置
+            device.flowPos = 0;
+
+            console.log("风流箭头已创建:", deviceId);
         }
 
         // 传感器模型相对简单，直接用一个立方体表示
@@ -536,6 +633,32 @@
 
         // 相机位置
         camera.position.set(0, 2, 5);
+
+        let globalArrow;
+        let globalFlowPos = 0;   // 从风筒起点开始
+
+        function createGlobalArrow() {
+
+            const geometry = new THREE.ConeGeometry(0.2, 0.8, 16);
+
+            const material = new THREE.MeshBasicMaterial({
+                color: 0x00ffff,
+                transparent: true
+            });
+
+            globalArrow = new THREE.Mesh(geometry, material);
+
+            // 旋转箭头指向右侧（沿X轴）
+            globalArrow.rotation.z = -Math.PI / 2;
+
+            // 初始位置在巷道左侧，稍微抬高一些
+            globalArrow.position.set(-50, 2.8, 0);
+
+            scene.add(globalArrow);
+        }
+
+        // 创建一次
+        createGlobalArrow();
 
         // 设备转速
         let rpm = 1000;
@@ -600,7 +723,7 @@
                 case "KeyA": moveLeft = true; break;
                 case "KeyD": moveRight = true; break;
                 case "Space": moveUp = true; break;
-                case "ShiftLeft": moveDown = true; break;
+                case "KeyJ": moveDown = true; break;
             }
 
         });
@@ -614,7 +737,7 @@
                 case "KeyA": moveLeft = false; break;
                 case "KeyD": moveRight = false; break;
                 case "Space": moveUp = false; break;
-                case "ShiftLeft": moveDown = false; break;
+                case "KeyJ": moveDown = false; break;
             }
 
         });
@@ -843,9 +966,8 @@
                 camera.position.y += direction.y * speed;
             }
 
-            //controls.update();
 
-            // 旋转风机叶片
+            // 设备动画：风机旋转
             Object.keys(deviceModels).forEach(id => {
 
                 const device = deviceModels[id];
@@ -856,10 +978,44 @@
                         part.rotation.y += device.rpm * 0.0001;
                     });
                 }
-
             });
 
             updateMachineColor();
+
+            // 每个风机的局部风流动画 
+            Object.values(deviceModels).forEach(device => {
+
+                if (device.arrow && device.duct) {
+
+                    let speed = device.rpm * 0.00002;
+
+                    device.flowPos += speed;
+
+                    if (device.flowPos > 30) {
+                        device.flowPos = 0;
+                    }
+
+                    // 风筒流动效果
+                    device.arrow.position.x =
+                        device.model.position.x + device.flowPos;
+
+                    device.arrow.position.z =
+                        device.model.position.z;
+
+                    device.duct.children.forEach(segment => {
+
+                        const tex = segment.userData.flowTexture;
+                        if (!tex) return;
+
+                        let flowSpeed = device.rpm * 0.00005;
+
+                        tex.offset.y += flowSpeed;  // 关键：纹理移动
+                    });
+                }
+
+            });
+
+
             // 选中高亮（黄色）
             if (selectedObject) {
                 selectedObject.traverse(child => {
@@ -993,14 +1149,13 @@
                     }
                 });
 
-                // 高亮整机
                 if (selectedDeviceId) {
 
                     const device = deviceModels[selectedDeviceId];
 
-                    // 设置新选中对象
+                    // 高亮选中
                     selectedObject = device.model;
-                    // 选中设备后显示其状态，同步UI选中
+
                     selectDevice(selectedDeviceId);
                 }
             }

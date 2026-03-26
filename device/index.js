@@ -38,6 +38,8 @@ ws.on('open', () => {
         registerDevice("fan1", "fan", -10, 0);
         registerDevice("fan2", "fan", 10, 0);
         registerDevice("sensor1", "sensor", 0, 0);
+        registerDevice("duct1", "duct", -50, 0);
+
 
     }, 300);
 

@@ -103,7 +103,6 @@ wss.on('connection', function (ws) {
 
         // 4 网页控制 → 发给设备（网页控制命令）
         if (data.type === "control") {
-
             const device = devices.get(data.deviceId);
 
             if (!device) {

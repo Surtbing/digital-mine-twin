@@ -87,16 +87,16 @@ wss.on('connection', function (ws) {
             broadcast({
                 type: "device_update",
                 deviceId: data.deviceId,
-
                 x: device.x,
                 z: device.z,
-
-                data: {
-                    rpm: data.data.rpm,
-                    temperature: data.data.temperature,
-                    status: data.data.status,
-                    mode: data.data.mode
-                }
+                // data: {
+                //     rpm: data.data.rpm,
+                //     temperature: data.data.temperature,
+                //     status: data.data.status,
+                //     mode: data.data.mode,
+                //     gas: data.data.gas
+                // }
+                data: data.data
             });
 
         }

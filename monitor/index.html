@@ -162,20 +162,83 @@
                     render();
                 };
 
-                // ✅ 处理状态（关键）
-                const statusClass = d.status
-                    ? d.status
-                    : (d.type === "sensor" ? "run" : "stop");
+                // 处理状态（关键）
+                let statusClass = "stop";
 
+                // 风机：用真实状态
+                if (d.type === "fan") {
+                    statusClass = d.status || "stop";
+                }
+
+                // 温度传感器：默认正常运行
+                else if (d.type === "sensor") {
+                    statusClass = "run";
+                }
+
+                // 瓦斯传感器：根据浓度判断
+                else if (d.type === "gas") {
+
+                    if (d.gas !== undefined && d.gas > 1) {
+                        statusClass = "alarm";   // 超标报警
+                    } else {
+                        statusClass = "run";     // 正常
+                    }
+                }
+
+                // 风筒：始终正常
+                else if (d.type === "duct") {
+                    statusClass = "run";
+                }
+                let content = "";
+
+                // 风机
+                if (d.type === "fan") {
+                    content = `
+        <div>RPM: ${d.rpm ?? "--"}</div>
+        <div>设备温度: ${d.temperature ?? "--"}°C</div>
+        <div>状态: ${d.status ?? "--"}</div>
+        <div>模式: ${d.mode ?? "--"}</div>
+    `;
+                }
+
+                // 温度传感器
+                else if (d.type === "sensor") {
+                    content = `
+        <div>环境温度: ${d.temperature ?? "--"}°C</div>
+        <div>状态: 正常</div>
+    `;
+                }
+
+                // 瓦斯传感器
+                else if (d.type === "gas") {
+                    content = `
+        <div style="color:${d.gas > 1 ? '#ef4444' : '#22c55e'}">
+            瓦斯浓度: ${d.gas ?? "--"}
+        </div>
+        <div>状态: ${d.gas > 1 ? "超标 🚨" : "安全"}</div>
+    `;
+                }
+
+                // 风筒
+                else if (d.type === "duct") {
+                    content = `
+        <div>类型: 风筒</div>
+        <div>状态: 正常</div>
+    `;
+                }
+
+                // 默认
+                else {
+                    content = `<div>未知设备</div>`;
+                }
+
+                // 最终渲染
                 div.innerHTML = `
     <div class="title">
         <span class="status ${statusClass}"></span>
         ${d.deviceId}
     </div>
-
-    <div>RPM: ${d.rpm ?? "--"}</div>
-    <div>温度: ${d.temperature ?? "--"}°C</div>
-    <div>状态: ${d.status ?? (d.type === "sensor" ? "normal" : "--")}</div>
+    ${content}
 `;
 
                 container.appendChild(div);

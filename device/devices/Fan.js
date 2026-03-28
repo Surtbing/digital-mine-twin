@@ -46,6 +46,20 @@ class Fan extends Device {
 
     update(env) {
 
+        // 自动控制逻辑
+        if (this.mode === "auto") {
+
+            // 瓦斯过高 → 自动启动风机
+            if (env.gas > 5) {
+                this.status = "run";
+            }
+
+            // 瓦斯安全 → 自动停止
+            else if (env.gas < 3) {
+                this.status = "stop";
+            }
+        }
+
         // 状态驱动 RPM
         if (this.status === "run") this.rpm += 20;
         if (this.status === "stop") this.rpm -= 30;
@@ -53,7 +67,7 @@ class Fan extends Device {
         // 限制范围
         this.rpm = Math.max(0, Math.min(1200, this.rpm));
 
-        // 🔥 核心：受环境影响
+        // 核心：受环境影响
         this.temperature = env.temperature + this.rpm * 0.01;
 
         // 报警逻辑

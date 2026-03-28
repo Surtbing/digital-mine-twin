@@ -182,6 +182,11 @@
         </div>
 
         <div class="row">
+            <div class="label">瓦斯浓度</div>
+            <div class="value"><span id="gas">0</span></div>
+        </div>
+
+        <div class="row">
             <div class="label">状态</div>
             <div class="value" id="deviceStatus">停止</div>
         </div>
@@ -212,7 +217,10 @@
 
                 <div class="btns">
                     <button onclick="addFan()">添加风机</button>
-                    <button onclick="addSensor()">添加传感器</button>
+                    <button onclick="addSensor()">添加温度传感器</button>
+                </div>
+                <div class="btns">
+                    <button onclick="addGas()">添加瓦斯传感器</button>
                 </div>
 
                 <div class="btns">
@@ -463,7 +471,8 @@
         // 设备加载注册表
         const deviceLoaders = {
             fan: loadFan,
-            sensor: loadSensor
+            sensor: loadSensor,
+            gas: loadGas
         };
 
         // 根据设备ID加载不同模型，放在不同位置
@@ -610,7 +619,7 @@
             console.log("风流箭头已创建:", deviceId);
         }
 
-        // 传感器模型相对简单，直接用一个立方体表示
+        // 温度传感器模型相对简单，直接用一个立方体表示
         function loadSensor(deviceId, x, z) {
 
             const geometry = new THREE.BoxGeometry(1, 1, 1);
@@ -628,6 +637,25 @@
             };
 
             console.log("Sensor加载完成:", deviceId);
+        }
+
+        // 瓦斯传感器模型，使用一个红色球体表示
+        function loadGas(deviceId, x, z) {
+
+            const geometry = new THREE.SphereGeometry(0.6, 16, 16);
+            const material = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+
+            const mesh = new THREE.Mesh(geometry, material);
+
+            mesh.position.set(x, 0.6, z);
+
+            scene.add(mesh);
+
+            deviceModels[deviceId] = {
+                model: mesh
+            };
+
+            console.log("Gas加载完成:", deviceId);
         }
 
 
@@ -687,30 +715,59 @@
         let yaw = 0;   // 左右旋转
         let pitch = 0; // 上下视角
 
+        let lastMoveTime = Date.now();
+        let idleThreshold = 50; // 超过50ms认为是噪声
+
         const speed = 0.1;
         const mouseSensitivity = 0.002;
 
         // 点击锁定鼠标
         document.addEventListener("click", () => {
             document.body.requestPointerLock();
+
+            yaw = camera.rotation.y;
+            pitch = camera.rotation.x;
         });
 
         // 鼠标移动控制视角
         document.addEventListener("mousemove", (event) => {
 
-            // 没锁定鼠标就不执行
             if (document.pointerLockElement !== document.body) return;
 
-            yaw -= event.movementX * mouseSensitivity;
-            pitch -= event.movementY * mouseSensitivity;
+            const now = Date.now();
 
-            // 限制上下角度（防止翻转）
+            let dx = event.movementX;
+            let dy = event.movementY;
+
+            console.log("movementX:", dx, "movementY:", dy);
+
+            // 如果长时间没有真实输入 → 忽略（核心）
+            if (dx === 0 && dy === 0) {
+                if (now - lastMoveTime > idleThreshold) {
+                    return;
+                }
+            } else {
+                lastMoveTime = now;
+            }
+
+            // 限制异常值
+            const MAX_DELTA = 15;
+            dx = Math.max(-MAX_DELTA, Math.min(MAX_DELTA, dx));
+            dy = Math.max(-MAX_DELTA, Math.min(MAX_DELTA, dy));
+
+            // 中等死区（扩大）
+            if (Math.abs(dx) < 2) dx = 0;
+            if (Math.abs(dy) < 2) dy = 0;
+
+            // 更新视角
+            yaw -= dx * mouseSensitivity;
+            pitch -= dy * mouseSensitivity;
+
             pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, pitch));
 
             camera.rotation.order = "YXZ";
             camera.rotation.y = yaw;
             camera.rotation.x = pitch;
-
         });
 
 
@@ -900,11 +957,19 @@
             }));
         };
 
-        // 添加传感器
+        // 添加温度传感器
         window.addSensor = function () {
             socket.send(JSON.stringify({
                 type: "add_device",
                 deviceType: "sensor"
+            }));
+        };
+
+        // 添加瓦斯传感器
+        window.addGas = function () {
+            socket.send(JSON.stringify({
+                type: "add_device",
+                deviceType: "gas"
             }));
         };
 
@@ -1294,6 +1359,11 @@
             // 设备温度（fan）
             if (data.temperature !== undefined) {
                 document.getElementById("fanTemp").innerText = data.temperature;
+            }
+
+            // 瓦斯浓度显示
+            if (data.gas !== undefined) {
+                document.getElementById("gas").innerText = data.gas;
             }
 
             // 固定使用 sensor1 作为环境温度

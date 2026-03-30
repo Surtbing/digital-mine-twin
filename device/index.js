@@ -37,8 +37,8 @@ ws.on('open', () => {
 
         registerDevice("fan1", "fan", -10, 0);
         registerDevice("fan2", "fan", 10, 0);
-        registerDevice("sensor1", "sensor", 0, 0);
-        registerDevice("gas1", "gas", 5, 0);
+        registerDevice("sensor1", "sensor", 0, -10);  // ← 左墙
+        registerDevice("gas1", "gas", 5, 10);         // ← 右墙
         registerDevice("duct1", "duct", -50, 0);
 
     }, 300);
@@ -78,15 +78,28 @@ ws.on('message', (message) => {
     console.log("收到:", data);
 
     // 1 新增设备（来自网页）
+    // 1 新增设备（来自网页）
     if (data.type === "add_device") {
 
         const id = data.deviceType + "_" + Date.now();
 
         console.log("新增设备:", id);
 
-        // 随机位置（核心新增）
+        // 随机 X（沿巷道）
         const x = Math.floor(Math.random() * 40 - 20);
-        const z = 0;
+
+        // 按设备类型决定 Z（关键修改）
+        let z = 0;
+
+        if (data.deviceType === "sensor") {
+            z = -10;   // 左墙
+        }
+        else if (data.deviceType === "gas") {
+            z = 10;    // 右墙
+        }
+        else if (data.deviceType === "fan") {
+            z = 0;     // 中间
+        }
 
         registerDevice(id, data.deviceType, x, z);
     }
@@ -150,17 +163,6 @@ setInterval(() => {
         device.update(env);   // 关键改动
     });
 
-    // 3 自动控制（用环境，不用sensor）
-    const fan = devices.get("fan1");
-
-    if (fan && fan.mode === "auto") {
-
-        if (env.temperature > 30) {
-            fan.start();
-        } else {
-            fan.stop();
-        }
-    }
 
 }, 1000);
 

@@ -619,45 +619,106 @@
             console.log("风流箭头已创建:", deviceId);
         }
 
-        // 温度传感器模型相对简单，直接用一个立方体表示
+        // 温度传感器模型
         function loadSensor(deviceId, x, z) {
 
-            const geometry = new THREE.BoxGeometry(1, 1, 1);
-            const material = new THREE.MeshStandardMaterial({ color: 0x00aaff });
+            const loader = new GLTFLoader();
 
-            const cube = new THREE.Mesh(geometry, material);
+            loader.load('../models/temperature_sensor.glb', function (gltf) {
 
-            cube.position.set(x, 0.5, z);
+                const model = gltf.scene;
 
-            scene.add(cube);
+                // 自动缩放
+                const box = new THREE.Box3().setFromObject(model);
+                const size = box.getSize(new THREE.Vector3());
+                const scale = 1.5 / Math.max(size.x, size.y, size.z);
+                model.scale.set(scale, scale, scale);
+                model.updateMatrixWorld(true);
 
-            deviceModels[deviceId] = {
-                model: cube,
-                rpm: 0
-            };
+                const newBox = new THREE.Box3().setFromObject(model);
+                // 底部高度
+                const bottom = newBox.min.y;
 
-            console.log("Sensor加载完成:", deviceId);
+                // 地面高度（和地面一致）
+                const groundY = 3;
+
+                // 左墙位置
+                const wallZ = -10;
+
+                // 防止贴死墙（避免穿模）
+                const offset = 0.6;
+
+                // 设置位置（关键修改点）
+                model.position.set(
+                    x,
+                    groundY - bottom,
+                    wallZ + offset
+                );
+
+                model.rotation.z = Math.PI;       // 面朝通道
+
+                scene.add(model);
+
+                deviceModels[deviceId] = {
+                    model: model
+                };
+
+                console.log("温度传感器加载完成:", deviceId);
+            });
         }
 
-        // 瓦斯传感器模型，使用一个红色球体表示
+        // 瓦斯传感器模型
+
         function loadGas(deviceId, x, z) {
 
-            const geometry = new THREE.SphereGeometry(0.6, 16, 16);
-            const material = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+            const loader = new GLTFLoader();
 
-            const mesh = new THREE.Mesh(geometry, material);
+            loader.load('../models/gas_sensor.glb', function (gltf) {
 
-            mesh.position.set(x, 0.6, z);
+                const model = gltf.scene;
 
-            scene.add(mesh);
+                // 给瓦斯传感器添加红色发光效果
+                model.traverse(child => {
+                    if (child.isMesh) {
+                        child.material.emissive = new THREE.Color(0xff0000);
+                        child.material.emissiveIntensity = 0.3;
+                    }
+                });
 
-            deviceModels[deviceId] = {
-                model: mesh
-            };
+                // 自动缩放
+                const box = new THREE.Box3().setFromObject(model);
+                const size = box.getSize(new THREE.Vector3());
+                console.log("瓦斯传感器尺寸:", size);
+                const scale = 1.5 / Math.max(size.x, size.y, size.z);
+                model.scale.set(scale, scale, scale);
 
-            console.log("Gas加载完成:", deviceId);
+                model.updateMatrixWorld(true);
+                // scale 后重新算 box
+                const newBox = new THREE.Box3().setFromObject(model);
+
+                const bottom = newBox.min.y;
+                const depth = newBox.max.z - newBox.min.z;
+
+                const wallZ = 10;     // 右墙
+                const offset = 0.6;   // 防止穿墙
+
+                model.position.set(
+                    x,
+                    4 - bottom,
+                    wallZ - offset
+                );
+
+                model.rotation.y = Math.PI;
+
+                scene.add(model);
+
+                deviceModels[deviceId] = {
+                    model: model
+                };
+
+                console.log("瓦斯传感器加载完成:", deviceId);
+            });
         }
-
 
         // 相机位置
         camera.position.set(0, 2, 5);
@@ -882,17 +943,63 @@
             if (msg.type === "device_update") {
 
                 const { deviceId, data, x, z } = msg;
+                console.log("服务器位置:", {
+                    deviceId,
+                    x,
+                    z
+                });
+
+                const device = deviceModels[deviceId];
 
                 console.log("更新位置:", deviceId, x, z);
+
+                if (device) {
+                    console.log("更新前模型位置:", {
+                        x: device.model.position.x,
+                        z: device.model.position.z
+                    });
+                }
 
                 // 更新状态
                 deviceStore[deviceId] = data;
 
-                // 核心：更新模型位置
-                const device = deviceModels[deviceId];
+                if (device && x !== undefined) {
 
-                if (device && x !== undefined && z !== undefined) {
-                    device.model.position.set(x, device.model.position.y, z);
+                    // 温度传感器 → 左墙
+                    if (deviceId.startsWith("sensor")) {
+
+                        const wallZ = -10;
+                        const offset = 0.6;
+
+                        device.model.position.set(
+                            x,
+                            device.model.position.y,
+                            wallZ + offset
+                        );
+
+                    }
+                    // 瓦斯传感器 → 右墙
+                    else if (deviceId.startsWith("gas")) {
+
+                        const wallZ = 10;
+                        const offset = 0.6;
+
+                        device.model.position.set(
+                            x,
+                            device.model.position.y,
+                            wallZ - offset
+                        );
+
+                    }
+                    // 其他设备（风机等）
+                    else {
+
+                        device.model.position.set(
+                            x,
+                            device.model.position.y,
+                            z
+                        );
+                    }
                 }
 
                 // 更新 UI
@@ -1430,7 +1537,6 @@
             }
         }
 
-        // 更新设备颜色
         function updateMachineColor() {
 
             Object.keys(deviceModels).forEach(id => {
@@ -1439,18 +1545,34 @@
 
                 device.model.traverse(child => {
 
-                    if (child.isMesh) {
+                    if (!child.isMesh) return;
 
-                        if (device.status === "run") {
-                            child.material.color.set(0x00ff00); // 绿色
-                        }
-                        else if (device.status === "stop") {
-                            child.material.color.set(0x888888); // 灰色
-                        }
-                        else if (device.status === "alarm") {
-                            child.material.color.set(0xff0000); // 红色
+                    // 1. 瓦斯传感器（优先判断）
+                    if (id.startsWith("gas")) {
+
+                        const data = deviceStore[id];
+
+                        if (data && data.gas !== undefined) {
+
+                            if (data.gas > 2) {
+                                child.material.color.set(0xff0000); // 红（危险）
+                            } else {
+                                child.material.color.set(0x00ff00); // 绿（安全）
+                            }
                         }
 
+                        return; // 瓦斯传感器优先判断，后续状态不影响它的颜色
+                    }
+
+                    // 2. 风机等设备
+                    if (device.status === "run") {
+                        child.material.color.set(0x00ff00);
+                    }
+                    else if (device.status === "stop") {
+                        child.material.color.set(0x888888);
+                    }
+                    else if (device.status === "alarm") {
+                        child.material.color.set(0xff0000);
                     }
 
                 });

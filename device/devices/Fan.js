@@ -45,22 +45,22 @@ class Fan extends Device {
     }
 
     update(env) {
-
-        // 自动控制逻辑
         if (this.mode === "auto") {
 
-            // 瓦斯过高 → 自动启动风机
-            if (env.gas > 5) {
+            // 高于上限才启动
+            if (env.gas > 2) {
                 this.status = "run";
             }
 
-            // 瓦斯安全 → 自动停止
-            else if (env.gas < 3) {
+            // 低于下限才停止
+            else if (env.gas < 1) {
                 this.status = "stop";
             }
+
+            // 中间区间（1 ~ 2）不做任何操作
         }
 
-        // 状态驱动 RPM
+        // 状态驱动 RPM（auto / manual 都生效）
         if (this.status === "run") this.rpm += 20;
         if (this.status === "stop") this.rpm -= 30;
 

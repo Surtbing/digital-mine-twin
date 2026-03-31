@@ -243,7 +243,7 @@
             </div>
 
             <div class="card">
-                <div class="label">温度趋势</div>
+                <div class="label">设备运行趋势</div>
                 <div id="trendChart" style="width:100%;height:150px;"></div>
             </div>
 
@@ -759,8 +759,23 @@
         let alarmBlink = false;
         let temperature = 0;
 
+        // 系统级报警状态
+        let systemAlarmLevel = "normal";
+        // normal | alarm | danger
+
+        // 记录上次报警时间，防止重复弹窗
+        let alarmStartTime = null;
+
+        // 防重复启动风机
+        let fanStarted = false;
+
         // WebSocket连接
         const socket = new WebSocket("ws://localhost:3000");
+
+        // 发送消息函数
+        function sendMsg(data) {
+            socket.send(JSON.stringify(data));
+        }
 
         // 第一人称控制变量
         let moveForward = false;
@@ -942,6 +957,8 @@
             // 4 实时数据更新
             if (msg.type === "device_update") {
 
+                console.log("瓦斯值实时:", msg.data?.gas);
+
                 const { deviceId, data, x, z } = msg;
                 console.log("服务器位置:", {
                     deviceId,
@@ -962,6 +979,113 @@
 
                 // 更新状态
                 deviceStore[deviceId] = data;
+                // 系统级报警判断
+                const hasDanger = Object.values(deviceStore)
+                    .some(d => d.gas !== undefined && d.gas >= GAS_DANGER);
+
+                const hasAlarm = Object.values(deviceStore)
+                    .some(d => d.gas !== undefined && d.gas >= GAS_ALARM);
+
+                if (hasDanger) {
+                    systemAlarmLevel = "danger";
+                } else if (hasAlarm) {
+                    systemAlarmLevel = "alarm";
+                } else {
+                    systemAlarmLevel = "normal";
+                }
+
+                // 报警弹窗
+                // 防止重复弹窗（关键）
+                if (!window.lastAlarmLevel) {
+                    window.lastAlarmLevel = "normal";
+                }
+
+                // 只在“刚进入危险状态”时弹一次
+                if (systemAlarmLevel === "danger" && window.lastAlarmLevel !== "danger") {
+                    alert("瓦斯浓度危险！请立即撤离！");
+                }
+
+                // 记录当前状态
+                window.lastAlarmLevel = systemAlarmLevel;
+
+                // 根据数据自动控制风机（核心逻辑）
+                const gasDevice = Object.entries(deviceStore)
+                    .find(([id, d]) => d.gas !== undefined);
+
+                const fanDevice = Object.entries(deviceStore)
+                    .find(([id, d]) => d.rpm !== undefined);
+
+                if (gasDevice && fanDevice) {
+
+                    const [gasId, gasData] = gasDevice;
+                    const [fanId, fanData] = fanDevice;
+
+                    const gas = gasData.gas;
+
+                    // 致命级
+                    if (gas >= GAS_CRITICAL) {
+
+                        // 只弹一次
+                        if (!window.criticalShown) {
+                            alert("瓦斯浓度致命！系统已锁定，立即撤离！");
+                            window.criticalShown = true;
+                        }
+
+                        // 系统锁死
+                        window.systemLocked = true;
+
+                        // 强制风机进入紧急模式
+                        socket.send(JSON.stringify({
+                            type: "control",
+                            deviceId: fanId,
+                            command: "emergency"
+                        }));
+
+                        // 关闭其他设备（除了风机）
+                        Object.keys(deviceStore).forEach(id => {
+                            if (!id.startsWith("fan")) {
+                                socket.send(JSON.stringify({
+                                    type: "control",
+                                    deviceId: id,
+                                    command: "shutdown"
+                                }));
+                            }
+                        });
+
+                        console.log("致命级：系统进入紧急状态");
+
+                        alarmStartTime = null;
+                    }
+                    // 报警：延迟启动
+                    else if (gas >= GAS_ALARM) {
+
+                        if (!alarmStartTime) {
+                            alarmStartTime = Date.now();
+                        }
+
+                        if (Date.now() - alarmStartTime > 5000) {
+
+                            // 只触发一次
+                            if (!fanStarted) {
+
+                                socket.send(JSON.stringify({
+                                    type: "control",
+                                    deviceId: fanId,
+                                    command: "start"
+                                }));
+
+                                console.log("瓦斯持续超标5秒，启动风机（只触发一次）");
+
+                                fanStarted = true; // 上锁
+                            }
+                        }
+
+                    } else {
+                        // 恢复正常 → 清空计时
+                        alarmStartTime = null;
+                        fanStarted = false; // 解锁
+                    }
+                }
 
                 if (device && x !== undefined) {
 
@@ -1002,6 +1126,17 @@
                     }
                 }
 
+                // 所有设备同步状态
+                if (deviceModels[deviceId]) {
+
+                    if (data.status !== undefined) {
+                        deviceModels[deviceId].status = data.status;
+                    }
+
+                    if (data.rpm !== undefined) {
+                        deviceModels[deviceId].rpm = data.rpm;
+                    }
+                }
                 // 更新 UI
                 if (deviceId === currentDevice) {
                     updateUI(data);
@@ -1020,6 +1155,10 @@
         };
 
         window.start = function () {
+            if (window.systemLocked) {
+                alert("系统已锁定，禁止操作！");
+                return;
+            }
 
             socket.send(JSON.stringify({
                 type: "control",
@@ -1029,6 +1168,10 @@
         }
 
         window.stop = function () {
+            if (window.systemLocked) {
+                alert("系统已锁定，禁止操作！");
+                return;
+            }
 
             socket.send(JSON.stringify({
                 type: "control",
@@ -1039,6 +1182,10 @@
 
         // 模式切换（手动）
         window.setManual = function () {
+            if (window.systemLocked) {
+                alert("系统已锁定，禁止操作！");
+                return;
+            }
             socket.send(JSON.stringify({
                 type: "control",
                 deviceId: currentDevice,
@@ -1047,6 +1194,10 @@
         };
         // 模式切换（自动）
         window.setAuto = function () {
+            if (window.systemLocked) {
+                alert("系统已锁定，禁止操作！");
+                return;
+            }
             socket.send(JSON.stringify({
                 type: "control",
                 deviceId: currentDevice,
@@ -1054,7 +1205,7 @@
             }));
         };
 
-        // ================== 设备管理 ==================
+        // 设备管理 
 
         // 添加风机
         window.addFan = function () {
@@ -1105,8 +1256,10 @@
         // 闪烁定时器
         setInterval(function () {
 
-            if (status === "alarm") {
+            if (systemAlarmLevel === "danger") {
                 alarmBlink = !alarmBlink;
+            } else {
+                alarmBlink = false;
             }
 
         }, 500);
@@ -1187,15 +1340,6 @@
 
             });
 
-
-            // 选中高亮（黄色）
-            if (selectedObject) {
-                selectedObject.traverse(child => {
-                    if (child.isMesh) {
-                        child.material.color.set(0xffff00);
-                    }
-                });
-            }
             renderer.render(scene, camera);
 
         }
@@ -1330,30 +1474,65 @@
 
                     selectDevice(selectedDeviceId);
                 }
-            }
+            } else {
 
+                // 点击空白 → 取消选中
+                selectedObject = null;
+
+                console.log("取消选中");
+
+            }
         }
 
         const chart = echarts.init(document.getElementById("trendChart"));
 
-        let chartData = [];
+        let tempData = [];
+        let gasData = [];
+        let rpmData = [];
 
-        function updateChart(value) {
+        // 瓦斯安全阈值
+        const GAS_ALARM = 1.0;   // 报警线（1%）
+        const GAS_DANGER = 2.0;  // 危险线（2%）
+        const GAS_CRITICAL = 3.0; // 致命级临界线（3%）
+
+        function updateChart(envTemp, gasValue, rpmValue) {
 
             const now = Date.now();
 
-            chartData.push([now, value]);
+            // 温度
+            if (envTemp !== undefined) {
+                tempData.push([now, envTemp]);
+                if (tempData.length > 50) tempData.shift();
+            }
 
-            if (chartData.length > 20) {
-                chartData.shift();
+            // 瓦斯
+            if (gasValue !== undefined) {
+                gasData.push([now, gasValue]);
+                if (gasData.length > 50) gasData.shift();
+            }
+
+            // RPM
+            if (rpmValue !== undefined) {
+                rpmData.push([now, rpmValue]);
+                if (rpmData.length > 50) rpmData.shift();
             }
 
             chart.setOption({
+
+                tooltip: {
+                    trigger: "axis"
+                },
+
+                legend: {
+                    data: ["温度", "瓦斯", "RPM"],
+                    textStyle: { color: "#fff" }
+                },
+
                 grid: {
-                    left: "10%",     // 给 y轴留空间
+                    left: "10%",
                     right: "5%",
-                    top: 20,
-                    bottom: 50,      // 给 x轴留空间
+                    top: 50,
+                    bottom: 10,
                     containLabel: true
                 },
 
@@ -1361,39 +1540,88 @@
                     type: "time",
                     boundaryGap: false,
                     axisLabel: {
-                        hideOverlap: true
-                    },
-                    axisLine: {
-                        show: true
+                        hideOverlap: true,
+                        margin: 15
                     }
                 },
 
-                yAxis: {
-                    type: "value",
-                    min: 0,
-                    max: 100,
-                    axisLabel: {
-                        margin: 10   // 防止贴边
-                    }
-                },
-
-                series: [{
-                    type: "line",
-                    data: chartData,
-                    smooth: true,
-                    showSymbol: false,
-                    clip: true,
-                    lineStyle: {
-                        width: 2
+                yAxis: [
+                    {
+                        type: "value",
+                        name: "温度(℃) / 瓦斯(%)",
+                        min: 0,
+                        max: 100,
+                        axisLabel: {
+                            color: "#ccc"
+                        },
+                        nameTextStyle: {
+                            color: "#aaa"
+                        }
                     },
-                    areaStyle: {
-                        opacity: 0.1
+                    {
+                        type: "value",
+                        name: "转速(RPM)",
+                        min: 0,
+                        max: 1200,
+                        axisLabel: {
+                            color: "#ccc"
+                        },
+                        nameTextStyle: {
+                            color: "#aaa"
+                        }
                     }
-                }]
+                ],
+
+                series: [
+
+                    {
+                        name: "温度",
+                        type: "line",
+                        data: tempData,
+                        smooth: true,
+                        showSymbol: false
+                    },
+
+                    {
+                        name: "瓦斯",
+                        type: "line",
+                        data: gasData,
+                        smooth: true,
+                        showSymbol: false,
+
+                        markLine: {
+                            symbol: "none",
+                            lineStyle: {
+                                type: "dashed"
+                            },
+                            label: {
+                                color: "#fff",
+                                distance: 10
+                            },
+                            data: [
+                                {
+                                    yAxis: GAS_ALARM,
+                                    name: "报警线"
+                                },
+                                {
+                                    yAxis: GAS_DANGER,
+                                    name: "危险线"
+                                }
+                            ]
+                        }
+                    },
+
+                    {
+                        name: "RPM",
+                        type: "line",
+                        yAxisIndex: 1,
+                        data: rpmData,
+                        smooth: true,
+                        showSymbol: false
+                    }
+                ]
             });
-
         }
-
 
         function renderDeviceList(devices) {
 
@@ -1468,9 +1696,27 @@
                 document.getElementById("fanTemp").innerText = data.temperature;
             }
 
-            // 瓦斯浓度显示
+            // 瓦斯 UI 报警增强
             if (data.gas !== undefined) {
-                document.getElementById("gas").innerText = data.gas;
+
+                const gasValue = data.gas;
+                const gasText = document.getElementById("gas");
+
+                if (gasValue >= GAS_DANGER) {
+
+                    gasText.style.color = "red";
+                    gasText.innerText = gasValue + "危险";
+
+                } else if (gasValue >= GAS_ALARM) {
+
+                    gasText.style.color = "orange";
+                    gasText.innerText = gasValue + "报警";
+
+                } else {
+
+                    gasText.style.color = "#ffffff";
+                    gasText.innerText = gasValue;
+                }
             }
 
             // 固定使用 sensor1 作为环境温度
@@ -1490,10 +1736,20 @@
                 document.getElementById("envTemp").innerText = sensorData.temperature;
             }
 
-            // 图表用环境温度
-            if (sensorData) {
-                updateChart(sensorData.temperature);
-            }
+            // ================= 图表数据（升级为多指标） =================
+
+            // 找瓦斯设备
+            const gasDevice = Object.values(deviceStore).find(d => d.gas !== undefined);
+
+            // 找风机设备
+            const fanDevice = Object.values(deviceStore).find(d => d.rpm !== undefined);
+
+            // 更新图表
+            updateChart(
+                sensorData ? sensorData.temperature : undefined,
+                gasDevice ? gasDevice.gas : undefined,
+                fanDevice ? fanDevice.rpm : undefined
+            );
 
             // 状态
             status = data.status;
@@ -1547,33 +1803,56 @@
 
                     if (!child.isMesh) return;
 
-                    // 1. 瓦斯传感器（优先判断）
+                    let color = 0xffffff; // 默认白色
+
+                    // 1. 瓦斯传感器
                     if (id.startsWith("gas")) {
 
                         const data = deviceStore[id];
 
                         if (data && data.gas !== undefined) {
 
-                            if (data.gas > 2) {
-                                child.material.color.set(0xff0000); // 红（危险）
-                            } else {
-                                child.material.color.set(0x00ff00); // 绿（安全）
+                            const gas = data.gas;
+
+                            if (gas >= GAS_DANGER) {
+                                color = alarmBlink ? 0xff0000 : 0x550000;
+                            }
+                            else if (gas >= GAS_ALARM) {
+                                color = 0xffff00;
+                            }
+                            else {
+                                color = 0x00ff00;
                             }
                         }
-
-                        return; // 瓦斯传感器优先判断，后续状态不影响它的颜色
                     }
 
-                    // 2. 风机等设备
-                    if (device.status === "run") {
-                        child.material.color.set(0x00ff00);
+                    // 2. 温度传感器 
+                    else if (id.startsWith("sensor")) {
+
+                        color = 0x00ff00; // 一直绿色
                     }
-                    else if (device.status === "stop") {
-                        child.material.color.set(0x888888);
+
+                    // 3. 风机 
+                    else {
+
+                        if (device.status === "run") {
+                            color = 0x00ff00;
+                        }
+                        else if (device.status === "stop") {
+                            color = 0x888888;
+                        }
+                        else if (device.status === "alarm") {
+                            color = 0xff0000;
+                        }
                     }
-                    else if (device.status === "alarm") {
-                        child.material.color.set(0xff0000);
+
+                    // 4. 选中高亮（最高优先级）
+                    if (selectedObject === device.model) {
+                        color = 0xffff00;
                     }
+
+                    // 统一在这里设置颜色（唯一出口）
+                    child.material.color.set(color);
 
                 });
 

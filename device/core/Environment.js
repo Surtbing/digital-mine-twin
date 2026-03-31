@@ -23,13 +23,22 @@ class Environment {
         // 冷却（风机主导）
         const cooling = airflowEffect * 0.2;
         this.temperature += heat - cooling;
-        
-        // 瓦斯浓度变化（核心改造）
-        const gasIncrease = 0.02;           // 地下释放
-        const gasDecrease = airflowEffect * 0.05; // 风机排出
 
-        this.gas += gasIncrease - gasDecrease;// 限制范围
+        // 瓦斯浓度变化
+        // 1. 瓦斯释放（高浓度时减缓）
+        let gasIncrease = this.gas > 5 ? 0.01 : 0.08;
 
+        // 2. 风机排气能力（必须足够强）
+        let gasDecrease = airflowEffect * 0.15;
+
+        // 3. 致命级强化排风（关键）
+        if (this.gas >= 3) {
+            gasDecrease += airflowEffect * 0.2;
+        }
+
+        // 4. 更新瓦斯
+        this.gas += gasIncrease - gasDecrease;
+        // 限制范围
         this.temperature = Math.max(15, Math.min(40, this.temperature));
         this.gas = Math.max(0, Math.min(10, this.gas));
     }
